@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: astrion
+      POSTGRES_PASSWORD: astrion
+      POSTGRES_DB: astrion
+    ports:
+      - "5432:5432"
+    volumes:
+      - astrion-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  astrion-postgres-data:

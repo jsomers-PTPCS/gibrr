@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ActorType {
+  Person
+  Group
+}
+
+model Actor {
+  id          String    @id @default(uuid())
+  username    String
+  domain      String
+  type        ActorType @default(Person)
+  displayName String?
+  summary     String?
+
+  // Present only for local actors (this instance controls the keypair).
+  publicKey   String
+  privateKey  String?
+
+  inboxUrl    String
+  outboxUrl   String
+
+  createdAt   DateTime  @default(now())
+
+  followers   Follow[]  @relation("FollowingActor")
+  following   Follow[]  @relation("FollowerActor")
+
+  @@unique([username, domain])
+}
+
+enum FollowState {
+  pending
+  accepted
+}
+
+model Follow {
+  id          String      @id @default(uuid())
+  followerId  String
+  followingId String
+  state       FollowState @default(pending)
+  createdAt   DateTime    @default(now())
+
+  follower    Actor @relation("FollowerActor", fields: [followerId], references: [id])
+  following   Actor @relation("FollowingActor", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+}
