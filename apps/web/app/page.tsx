@@ -1,27 +1,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+import { getFeed, type Post } from "../lib/api";
+import { PostItem } from "../components/PostItem";
 
 export default function HomePage() {
-  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [posts, setPosts] = useState<Post[] | "loading" | "error">("loading");
 
   useEffect(() => {
-    fetch(`${API_URL}/health`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(res)))
-      .then((data) => setStatus(data.status === "ok" ? "ok" : "error"))
-      .catch(() => setStatus("error"));
+    getFeed()
+      .then((res) => setPosts(res.posts))
+      .catch(() => setPosts("error"));
   }, []);
 
   return (
-    <main style={{ fontFamily: "sans-serif", padding: "3rem" }}>
+    <main style={{ padding: "2rem" }}>
       <h1>Astrion</h1>
       <p>A federated social platform.</p>
-      <p>
-        API status:{" "}
-        {status === "loading" ? "checking…" : status === "ok" ? "✅ connected" : "❌ unreachable"}
-      </p>
+
+      {posts === "loading" && <p>Loading feed…</p>}
+      {posts === "error" && <p>Could not reach the API.</p>}
+      {Array.isArray(posts) && posts.length === 0 && (
+        <p>
+          No posts yet. <a href="/submit">Submit the first one.</a>
+        </p>
+      )}
+      {Array.isArray(posts) && posts.length > 0 && (
+        <ul style={{ listStyle: "none", padding: 0 }}>
+          {posts.map((post) => (
+            <PostItem key={post.id} post={post} />
+          ))}
+        </ul>
+      )}
     </main>
   );
 }

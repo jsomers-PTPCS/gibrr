@@ -32,6 +32,10 @@ model Actor {
   followers   Follow[]  @relation("FollowingActor")
   following   Follow[]  @relation("FollowerActor")
 
+  localUser   LocalUser?
+  community   Community?
+  posts       Post[]
+
   @@unique([username, domain])
 }
 
@@ -51,4 +55,48 @@ model Follow {
   following   Actor @relation("FollowingActor", fields: [followingId], references: [id])
 
   @@unique([followerId, followingId])
+}
+
+model LocalUser {
+  id           String    @id @default(uuid())
+  actorId      String    @unique
+  email        String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+
+  actor        Actor     @relation(fields: [actorId], references: [id])
+  sessions     Session[]
+}
+
+model Session {
+  id          String   @id @default(uuid())
+  localUserId String
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  localUser   LocalUser @relation(fields: [localUserId], references: [id])
+}
+
+model Community {
+  id          String   @id @default(uuid())
+  actorId     String   @unique
+  title       String
+  description String?
+  createdAt   DateTime @default(now())
+
+  actor       Actor    @relation(fields: [actorId], references: [id])
+  posts       Post[]
+}
+
+model Post {
+  id            String    @id @default(uuid())
+  title         String
+  url           String?
+  body          String?
+  authorActorId String
+  communityId   String
+  createdAt     DateTime  @default(now())
+
+  author        Actor     @relation(fields: [authorActorId], references: [id])
+  community     Community @relation(fields: [communityId], references: [id])
 }

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Nav } from "../components/Nav";
 
 export const metadata = {
   title: "Astrion",
@@ -8,7 +9,10 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body style={{ fontFamily: "sans-serif" }}>
+        <Nav />
+        {children}
+      </body>
     </html>
   );
 }

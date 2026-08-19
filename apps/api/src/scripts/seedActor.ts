@@ -1,8 +1,8 @@
 import { prisma } from "../db.js";
-import { generateActorKeyPair } from "../federation/keys.js";
+import { createLocalActor, localDomain } from "../federation/localActor.js";
 
 async function main() {
-  const domain = process.env.DOMAIN ?? `localhost:${process.env.PORT ?? 4000}`;
+  const domain = localDomain();
   const username = "testuser";
 
   const existing = await prisma.actor.findUnique({
@@ -13,21 +13,14 @@ async function main() {
     return;
   }
 
-  const { publicKey, privateKey } = generateActorKeyPair();
-  const actorUrl = `http://${domain}/users/${username}`;
-
-  const actor = await prisma.actor.create({
-    data: {
+  const actor = await prisma.$transaction((tx) =>
+    createLocalActor(tx, {
       username,
-      domain,
+      type: "Person",
       displayName: "Test User",
       summary: "A local test actor for verifying the federation skeleton.",
-      publicKey,
-      privateKey,
-      inboxUrl: `${actorUrl}/inbox`,
-      outboxUrl: `${actorUrl}/outbox`,
-    },
-  });
+    }),
+  );
 
   console.log(`created actor ${actor.username}@${actor.domain} (${actor.id})`);
 }
