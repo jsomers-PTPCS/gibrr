@@ -25,6 +25,11 @@ export function Nav() {
   const [sessions, setSessions] = useState<SessionAccount[]>([]);
   const [switching, setSwitching] = useState<string | null>(null);
   const switcherRef = useRef<HTMLDivElement>(null);
+  // Federated/Circles/search/Host collapse behind this on a narrow phone
+  // screen (see .nav-toggle/.nav-links in globals.css) — without it, that
+  // whole row is wider than the viewport and the entire page scrolls
+  // sideways to show it.
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   function refresh() {
     getMe()
@@ -103,33 +108,53 @@ export function Nav() {
         GIBRR
       </Link>
 
-      <Link href="/federated" style={{ whiteSpace: "nowrap" }}>
-        Federated
-      </Link>
+      <button
+        type="button"
+        className="nav-toggle btn btn-ghost"
+        aria-label={mobileOpen ? "Close menu" : "Open menu"}
+        aria-expanded={mobileOpen}
+        onClick={() => setMobileOpen((open) => !open)}
+      >
+        {mobileOpen ? "✕" : "☰"}
+      </button>
 
-      <Link href="/g" style={{ whiteSpace: "nowrap" }}>
-        Circles
-      </Link>
+      <div className={`nav-links${mobileOpen ? " nav-links-open" : ""}`}>
+        <Link href="/federated" style={{ whiteSpace: "nowrap" }} onClick={() => setMobileOpen(false)}>
+          Federated
+        </Link>
 
-      <form onSubmit={handleSearch} style={{ flex: 1, maxWidth: 360 }}>
-        <input
-          className="input"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search Gibrr"
-          aria-label="Search"
-          style={{ width: "100%" }}
-        />
-      </form>
+        <Link href="/g" style={{ whiteSpace: "nowrap" }} onClick={() => setMobileOpen(false)}>
+          Circles
+        </Link>
+
+        <form
+          onSubmit={(e) => {
+            handleSearch(e);
+            setMobileOpen(false);
+          }}
+          style={{ flex: 1, maxWidth: 360 }}
+        >
+          <input
+            className="input"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search Gibrr"
+            aria-label="Search"
+            style={{ width: "100%" }}
+          />
+        </form>
+
+        {me !== "loading" && me?.isAdmin && (
+          <Link href="/admin" style={{ whiteSpace: "nowrap" }} onClick={() => setMobileOpen(false)}>
+            Host
+          </Link>
+        )}
+      </div>
 
       <div className="nav-spacer" />
+      <div className="nav-account">
       {me === "loading" ? null : me ? (
         <>
-          {me.isAdmin && (
-            <Link href="/admin" style={{ whiteSpace: "nowrap" }}>
-              Host
-            </Link>
-          )}
           <div ref={switcherRef} style={{ position: "relative" }}>
             <button
               className="btn btn-ghost"
@@ -265,6 +290,7 @@ export function Nav() {
           </Link>
         </>
       )}
+      </div>
     </nav>
   );
 }
