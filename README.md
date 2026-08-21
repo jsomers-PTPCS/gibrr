@@ -1,4 +1,4 @@
-# Astrion
+# Gibrr
 
 A federated social platform: a Reddit/Lemmy-style feed combined with a
 Facebook/Friendica-style profile, built on [ActivityPub](https://www.w3.org/TR/activitypub/)
@@ -76,5 +76,5 @@ that's the natural next milestone once real feed/profile features exist.
 - Auth / login
 - Posts, comments, votes, communities (the actual feed + profile features)
 - Outbox activity delivery to remote servers, and a real job queue
-- Following *from* Astrion (currently only handles inbound `Follow`)
+- Following *from* Gibrr (currently only handles inbound `Follow`)
 - Broader ActivityPub activity coverage (`Create`, `Like`, `Announce`, `Undo`, …)

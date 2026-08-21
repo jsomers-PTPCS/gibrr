@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../db.js";
+import { actorIri } from "../federation/localActor.js";
 
 export const webfingerRouter = Router();
 
@@ -20,7 +21,7 @@ webfingerRouter.get("/.well-known/webfinger", async (req, res) => {
   });
   if (!actor) return res.status(404).json({ error: "not found" });
 
-  const actorUrl = `http://${actor.domain}/users/${actor.username}`;
+  const actorUrl = actorIri(actor);
 
   res.set("Content-Type", "application/jrd+json");
   res.json({

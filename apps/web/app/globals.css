@@ -1,0 +1,651 @@
+:root {
+  /* Dark is the default look (and the only theme when nothing has set
+     data-theme yet, e.g. before the settings-page script runs anywhere). */
+  --bg: #0a0710;
+  --bg-elevated: #0f0a1a;
+  --surface: #170f26;
+  --surface-hover: #1f1533;
+  --border: #2f2247;
+  --border-bright: #4c3372;
+  --nav-bg: rgba(10, 7, 16, 0.85);
+
+  --text: #f3eefc;
+  --text-dim: #a99cc9;
+  --text-faint: #7a6d94;
+
+  --primary: #9333ea;
+  --primary-bright: #a855f7;
+  --primary-dim: #3b1d63;
+
+  --accent: #ff8a1e;
+  --accent-bright: #ffa64d;
+  /* White-on-orange by design (bold sci-fi look over strict AA contrast). */
+  --accent-text: #ffffff;
+
+  --danger: #f87171;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+
+  --font-display: "Orbitron", var(--font-body), sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f1fa;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-hover: #f1eafb;
+  --border: #ddd3ee;
+  --border-bright: #c3a9ec;
+  --nav-bg: rgba(255, 255, 255, 0.85);
+
+  --text: #1c1330;
+  --text-dim: #5a4b78;
+  --text-faint: #8577a0;
+
+  --primary: #9333ea;
+  --primary-bright: #7e22ce;
+  --primary-dim: #ece2fb;
+
+  --accent: #ff8a1e;
+  --accent-bright: #f4770a;
+
+  --danger: #dc2626;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background: radial-gradient(circle at top, var(--bg-elevated) 0%, var(--bg) 60%);
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: var(--font-body);
+  min-height: 100vh;
+}
+
+a {
+  color: var(--primary-bright);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Layout */
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+
+.page-wide {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+/* Buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid var(--border-bright);
+  background: var(--surface-hover);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.btn:hover {
+  filter: brightness(1.15);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-bright) 100%);
+  border-color: var(--primary-bright);
+  color: #fff;
+}
+
+.btn-accent {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-bright) 100%);
+  border-color: var(--accent-bright);
+  color: var(--accent-text);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: var(--border);
+}
+
+/* A post's action row (boost/bookmark/comment/edit/delete/report) —
+   icon-only, borderless, uniformly faded-purple (--text-dim already is
+   one) rather than each action fighting for attention with its own
+   color/label. Toggled states (boosted/bookmarked) get a soft
+   --primary-dim background instead of recoloring the icon, so the
+   on/off signal survives without breaking that single shared color. */
+.post-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-dim);
+}
+.post-icon-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Forms */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.input,
+textarea.input,
+select.input {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.input:focus,
+textarea.input:focus,
+select.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255, 138, 30, 0.25);
+}
+
+.error-text {
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+/* Nav */
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--nav-bg);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-logo {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.3rem;
+  background: linear-gradient(135deg, var(--primary-bright), var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: 0.05em;
+}
+
+.nav-spacer {
+  flex: 1;
+}
+
+.nav a {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.nav a:hover {
+  color: var(--accent);
+}
+
+/* .nav a's (class + element) specificity otherwise beats .btn-primary's
+   (class-only) color, leaving the Register button's text dim instead of
+   the white .btn-primary intends. */
+.nav .btn-primary {
+  color: #fff;
+}
+
+/* Avatar */
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* Own-profile avatar/header — hover reveals a "change photo" overlay
+   button (see app/u/[username]/page.tsx); hidden otherwise so a
+   visitor viewing someone else's profile never sees it. */
+.profile-image-editable {
+  position: relative;
+}
+.profile-image-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border: none;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.profile-image-editable:hover .profile-image-overlay,
+.profile-image-overlay:disabled {
+  opacity: 1;
+}
+
+/* Vote chip */
+
+.vote-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  width: 2.5rem;
+  flex-shrink: 0;
+}
+
+.vote-chip button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--text-faint);
+  padding: 0.15rem;
+  border-radius: var(--radius-sm);
+}
+
+.vote-chip button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.vote-chip button.active-up {
+  color: var(--accent);
+}
+
+.vote-chip button.active-down {
+  color: var(--primary-bright);
+}
+
+.vote-score {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+/* Pills */
+
+.pill {
+  display: inline-block;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.text-dim {
+  color: var(--text-dim);
+}
+
+.text-faint {
+  color: var(--text-faint);
+  font-size: 0.85rem;
+}
+
+/* Sanitized group-description HTML (see api's descriptionHtml.ts) — the
+   only place this app renders real markup outside a sandboxed iframe.
+   Deliberately restrained sizing so a bio's own <h1> doesn't compete
+   with the page's actual heading. */
+.rendered-description {
+  line-height: 1.5;
+  /* A bio can contain a long unbroken URL/token with no spaces to wrap
+     on — without this, that single word overflows straight out of
+     whatever card/column contains it instead of breaking. */
+  overflow-wrap: anywhere;
+}
+.rendered-description > :first-child {
+  margin-top: 0;
+}
+.rendered-description > :last-child {
+  margin-bottom: 0;
+}
+.rendered-description p {
+  margin: 0.5rem 0;
+}
+.rendered-description h1,
+.rendered-description h2,
+.rendered-description h3,
+.rendered-description h4,
+.rendered-description h5,
+.rendered-description h6 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0.75rem 0 0.25rem;
+}
+.rendered-description blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+  color: var(--text-dim);
+}
+.rendered-description ul,
+.rendered-description ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+.rendered-description code,
+.rendered-description pre {
+  font-family: monospace;
+  background: var(--surface-hover);
+  border-radius: 3px;
+  padding: 0.1rem 0.3rem;
+}
+.rendered-description a {
+  color: var(--accent);
+}
+
+/* Color swatch picker: ringed current-color circle + a row of hexagon
+   preset swatches. */
+
+.swatch-current {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.swatch-current input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.swatch-hex {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  flex-shrink: 0;
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+}
+
+.swatch-hex:hover {
+  filter: brightness(1.15);
+}
+
+/* Chat bubbles */
+
+.chat-bubble {
+  max-width: 70%;
+  padding: 0.55rem 0.85rem;
+  border-radius: 1.1rem;
+  margin-bottom: 0.5rem;
+  word-break: break-word;
+}
+
+.chat-bubble-mine {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-bright) 100%);
+  color: var(--accent-text);
+  margin-left: auto;
+  border-bottom-right-radius: 0.25rem;
+}
+
+.chat-bubble-theirs {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  margin-right: auto;
+  border-bottom-left-radius: 0.25rem;
+}
+
+.conversation-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+}
+
+.conversation-row:hover {
+  background: var(--surface-hover);
+}
+
+/* Messenger-style floating chat dock — fixed to the corner on every page
+   instead of messaging living at /messages as a full-page route. */
+
+.chat-dock-launcher {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-bright) 100%);
+  color: var(--accent-text);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 100;
+}
+
+.chat-dock-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+.chat-dock-panel {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  width: 320px;
+  height: 440px;
+  max-height: calc(100vh - 2.5rem);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 100;
+}
+
+.chat-dock-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.chat-dock-close,
+.chat-dock-back {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.15rem 0.3rem;
+}
+
+.chat-dock-close:hover,
+.chat-dock-back:hover {
+  color: var(--text);
+}
+
+.chat-dock-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.chat-dock-conversation {
+  display: flex;
+  width: 100%;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chat-dock-thread {
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem;
+}
+
+.chat-dock-footer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* Underline tab strip (Facebook-profile-style, as opposed to the pill
+   .btn-primary/.btn-ghost toggle used elsewhere) */
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0 1rem;
+}
+
+.tabs button {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--text-dim);
+  font-weight: 600;
+  padding: 0.85rem 0.75rem;
+  cursor: pointer;
+}
+
+.tabs button:hover {
+  color: var(--text);
+}
+
+.tabs button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* Intro sidebar (profile page) */
+
+.intro-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+}

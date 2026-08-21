@@ -7,6 +7,7 @@ dist/
 !.env.example
 !.env.local.example
 *.log
+apps/api/uploads/
 .claude/settings.local.json
 .DS_Store
 .turbo/

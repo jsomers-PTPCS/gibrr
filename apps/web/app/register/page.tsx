@@ -25,25 +25,32 @@ export default function RegisterPage() {
   }
 
   return (
-    <main style={{ padding: "2rem", maxWidth: 400 }}>
+    <main className="page" style={{ maxWidth: 380 }}>
       <h1>Register</h1>
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-        <label>
+      <form onSubmit={handleSubmit} className="card">
+        <label className="field">
           Username
-          <input value={username} onChange={(e) => setUsername(e.target.value)} required />
+          <input
+            className="input"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+          />
         </label>
-        <label>
+        <label className="field">
           Email
           <input
+            className="input"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
           />
         </label>
-        <label>
+        <label className="field">
           Password
           <input
+            className="input"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -51,10 +58,10 @@ export default function RegisterPage() {
             minLength={8}
           />
         </label>
-        <button type="submit" disabled={submitting}>
+        <button type="submit" disabled={submitting} className="btn btn-accent" style={{ width: "100%" }}>
           {submitting ? "Registering…" : "Register"}
         </button>
-        {error && <p style={{ color: "red" }}>{error}</p>}
+        {error && <p className="error-text">{error}</p>}
       </form>
     </main>
   );

@@ -10,6 +10,15 @@ datasource db {
 enum ActorType {
   Person
   Group
+  // System/bot-style actors — real relay software self-reports as one
+  // or the other depending on implementation, so both are accepted
+  // rather than collapsing either into Person (federation/remoteActor.ts's
+  // upsertRemoteActor). Also used for this instance's own system actor
+  // (federation/localActor.ts's getOrCreateInstanceActor), which sends
+  // relay subscription Follows on the instance's behalf rather than any
+  // one person's.
+  Application
+  Service
 }
 
 model Actor {
@@ -19,22 +28,115 @@ model Actor {
   type        ActorType @default(Person)
   displayName String?
   summary     String?
+  pronouns    String?
+  location    String?
+  website     String?
+
+  // "About" section — see federation/aboutFields.ts for the shared field
+  // key list and routes/profile.ts for the redaction logic. Default is
+  // hidden: a field only shows to non-owner viewers if aboutVisibility
+  // has an explicit `true` for its key.
+  workplace       String?
+  hometown        String?
+  dateOfBirth     DateTime?
+  gender          String?
+  languages       String[]  @default([])
+  education       String?
+  interests       String[]  @default([])
+  customFacts     Json? // [{ label: string, value: string }], max 10
+  aboutVisibility Json? // { [fieldKey: string]: boolean }
+
+  // Free-standing self-description — no confirmation needed (unlike
+  // tagging a specific person via FamilyLink below). Closed vocabulary,
+  // see federation/relationshipStatus.ts.
+  relationshipStatus String?
+
+  // Profile appearance — colors/fonts are closed-vocabulary values applied
+  // via React's style prop (never string-templated into CSS), and images
+  // are re-encoded server-side via sharp before storage. See
+  // routes/profile.ts and routes/profileImage.ts.
+  backgroundColor    String?
+  backgroundImageUrl String?
+  headerColor        String?
+  headerImageUrl     String?
+  avatarImageUrl     String?
+  introBoxColor      String?
+  contentBoxColor    String?
+  fontFamily         String?
+  fontColor          String?
+  // Built-in preset "pictures" (SVG data URIs, defined client-side — see
+  // apps/web/lib/imagePresets.ts) selectable as an alternative to
+  // uploading a custom image. Mutually exclusive with the corresponding
+  // *ImageUrl field — routes/profile.ts and routes/profileImage.ts each
+  // clear the other side when one is set.
+  headerPreset       String?
+  backgroundPreset   String?
+  avatarPreset       String?
+
+  // MySpace-style profile customization. Sanitized server-side (see
+  // routes/profile.ts) but currently unused by the frontend — the
+  // sandboxed-iframe renderer was removed after a design pass, kept here
+  // since the sanitization work is reusable if this comes back.
+  customCss  String?
+  customHtml String?
 
   // Present only for local actors (this instance controls the keypair).
-  publicKey   String
-  privateKey  String?
+  publicKey  String
+  privateKey String?
 
-  inboxUrl    String
-  outboxUrl   String
+  inboxUrl  String
+  outboxUrl String
 
-  createdAt   DateTime  @default(now())
+  createdAt DateTime @default(now())
 
-  followers   Follow[]  @relation("FollowingActor")
-  following   Follow[]  @relation("FollowerActor")
+  followers Follow[] @relation("FollowingActor")
+  following Follow[] @relation("FollowerActor")
 
-  localUser   LocalUser?
-  community   Community?
-  posts       Post[]
+  blocksMade     Block[] @relation("BlockerActor")
+  blocksReceived Block[] @relation("BlockedActor")
+
+  reportsFiled   Report[] @relation("Reporter")
+  reportsAgainst Report[] @relation("ReportedActor")
+
+  outboundDeliveries OutboundDelivery[]
+
+  localUser    LocalUser?
+  community    Community?
+  posts        Post[]
+  comments     Comment[]
+  postVotes    PostVote[]
+  commentVotes CommentVote[]
+  postBoosts   PostBoost[]
+  reactions    Reaction[]
+  postRecipients PostRecipient[]
+  pollVotes      PollVote[]
+  bookmarks      Bookmark[]
+  antennas       Antenna[]
+  profileMemosWritten ProfileMemo[] @relation("ProfileMemoAuthor")
+  profileMemosAbout   ProfileMemo[] @relation("ProfileMemoSubject")
+  exploreSubscriptions ExploreSubscription[]
+
+  conversationParticipants ConversationParticipant[]
+  sentMessages             Message[]
+
+  calendarConnection CalendarConnection?
+  calendarEventSaves CalendarEventSave[]
+
+  // Bearer credential for GET /calendar/export/:token.ics — never
+  // serialized (stripped in toPublicActor, same as privateKey). Null
+  // until the owner generates one; regenerating replaces it, revoking
+  // any previously-issued export link.
+  calendarExportToken String? @unique
+
+  friendshipsSent       Friendship[]          @relation("FriendshipRequester")
+  friendshipsReceived   Friendship[]          @relation("FriendshipAddressee")
+  communityMemberships  CommunityMembership[]
+  familyLinksOwned      FamilyLink[]          @relation("FamilyLinkOwner")
+  familyLinksAsRelative FamilyLink[]          @relation("FamilyLinkRelative")
+
+  albums           Album[]
+  photos           Photo[]
+  immichConnection ImmichConnection?
 
   @@unique([username, domain])
 }
@@ -51,21 +153,156 @@ model Follow {
   state       FollowState @default(pending)
   createdAt   DateTime    @default(now())
 
-  follower    Actor @relation("FollowerActor", fields: [followerId], references: [id])
-  following   Actor @relation("FollowingActor", fields: [followingId], references: [id])
+  follower  Actor @relation("FollowerActor", fields: [followerId], references: [id])
+  following Actor @relation("FollowingActor", fields: [followingId], references: [id])
 
   @@unique([followerId, followingId])
 }
 
-model LocalUser {
-  id           String    @id @default(uuid())
-  actorId      String    @unique
-  email        String    @unique
-  passwordHash String
-  createdAt    DateTime  @default(now())
+// One-directional, no accept/reject state (unlike Follow) — blocking
+// takes effect immediately on the blocker's side regardless of whether
+// the target ever finds out. See routes/blocks.ts for the mutual-
+// unfollow-on-block and inbox enforcement this drives.
+model Block {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
 
-  actor        Actor     @relation(fields: [actorId], references: [id])
-  sessions     Session[]
+  blocker Actor @relation("BlockerActor", fields: [blockerId], references: [id])
+  blocked Actor @relation("BlockedActor", fields: [blockedId], references: [id])
+
+  @@unique([blockerId, blockedId])
+}
+
+// Mutual, request/accept "friends" — structurally separate from Follow
+// (one-directional, feed-oriented). Same requester/addressee + state
+// shape as Follow, proven already for this kind of relationship.
+enum FriendshipState {
+  pending
+  accepted
+}
+
+model Friendship {
+  id          String          @id @default(uuid())
+  requesterId String
+  addresseeId String
+  state       FriendshipState @default(pending)
+  createdAt   DateTime        @default(now())
+
+  requester Actor @relation("FriendshipRequester", fields: [requesterId], references: [id])
+  addressee Actor @relation("FriendshipAddressee", fields: [addresseeId], references: [id])
+
+  @@unique([requesterId, addresseeId])
+}
+
+// Joining a public community is one-sided ("I'm interested"); joining a
+// private/secret one goes through the same pending/accepted state as
+// Friendship/FamilyLink — see the `state` field below.
+model CommunityMembership {
+  id          String   @id @default(uuid())
+  actorId     String
+  communityId String
+  // "owner" | "admin" | "moderator" | "member" — hierarchy enforced in
+  // routes/communities.ts, not the DB. Existing rows (from before group
+  // management existed) default to "member", which is correct for them —
+  // they were all created under the old instant-join model.
+  role        String   @default("member")
+  // "pending" | "accepted" — public communities create an accepted
+  // membership immediately on join; private/secret create a pending one
+  // that an admin/moderator/owner must approve. Existing rows default to
+  // "accepted" for the same reason as role's default.
+  state       String   @default("accepted")
+  createdAt   DateTime @default(now())
+
+  actor     Actor     @relation(fields: [actorId], references: [id])
+  community Community @relation(fields: [communityId], references: [id])
+
+  @@unique([actorId, communityId])
+}
+
+// Tagging someone as a specific relative/partner requires their
+// confirmation before it shows on either profile — same trust model as
+// a friend request, since one person shouldn't be able to unilaterally
+// claim a relationship with another. relationType is from actorId's
+// point of view ("relative is my {relationType}"); the inverse shown on
+// relativeId's own profile is computed server-side (see routes/family.ts),
+// not stored twice.
+enum FamilyRelationType {
+  partner
+  spouse
+  parent
+  child
+  sibling
+  other
+}
+
+enum FamilyLinkState {
+  pending
+  accepted
+}
+
+model FamilyLink {
+  id           String             @id @default(uuid())
+  actorId      String
+  relativeId   String
+  relationType FamilyRelationType
+  state        FamilyLinkState    @default(pending)
+  createdAt    DateTime           @default(now())
+
+  actor    Actor @relation("FamilyLinkOwner", fields: [actorId], references: [id])
+  relative Actor @relation("FamilyLinkRelative", fields: [relativeId], references: [id])
+
+  @@unique([actorId, relativeId])
+}
+
+model LocalUser {
+  id           String   @id @default(uuid())
+  actorId      String   @unique
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  // Instance-wide admin role — separate from the per-community
+  // owner/admin/moderator/member roles on CommunityMembership. Suspension
+  // is checked both at login and on every session load (auth/session.ts),
+  // so it takes effect immediately for an already-logged-in account, not
+  // just future logins.
+  isAdmin   Boolean @default(false)
+  suspended Boolean @default(false)
+
+  // Set by POST /auth/verify-email consuming the token below (sent by
+  // email at registration and via /auth/resend-verification). Not
+  // currently an enforcement gate anywhere — login/posting work
+  // regardless — just a trust signal + infrastructure for one.
+  emailVerified               Boolean   @default(false)
+  emailVerificationToken      String?   @unique
+  emailVerificationExpiresAt  DateTime?
+
+  // POST /auth/forgot-password issues one of these (1h expiry);
+  // POST /auth/reset-password consumes it and clears both fields.
+  passwordResetToken    String?   @unique
+  passwordResetExpiresAt DateTime?
+
+  // Optional TOTP-based 2FA (auth/twoFactor.ts) — Misskey/most fediverse
+  // software's own approach, an authenticator app rather than SMS.
+  // twoFactorSecret is set as soon as POST /auth/2fa/setup generates one
+  // but twoFactorEnabled stays false until POST /auth/2fa/enable proves
+  // the user actually scanned it and can produce a valid code — so a
+  // setup someone starts and abandons never locks them out. Stored
+  // plaintext, same disclosed no-at-rest-encryption posture as
+  // CalendarConnection/ImmichConnection's own credentials elsewhere in
+  // this app. twoFactorBackupCodes holds bcrypt hashes (same as
+  // passwordHash), one-time use — a consumed code is removed from the
+  // array, not just flagged, so the array's length is always "codes
+  // remaining."
+  twoFactorSecret      String?
+  twoFactorEnabled     Boolean  @default(false)
+  twoFactorBackupCodes String[] @default([])
+
+  actor    Actor     @relation(fields: [actorId], references: [id])
+  sessions Session[]
+  twoFactorChallenges TwoFactorChallenge[]
 }
 
 model Session {
@@ -74,7 +311,25 @@ model Session {
   expiresAt   DateTime
   createdAt   DateTime @default(now())
 
-  localUser   LocalUser @relation(fields: [localUserId], references: [id])
+  localUser LocalUser @relation(fields: [localUserId], references: [id])
+}
+
+// A password-verified-but-2FA-not-yet-entered login, in between
+// POST /auth/login and POST /auth/2fa/challenge — a real Session row
+// (and its cookie) is deliberately not created until the second factor
+// checks out, so a stolen password alone can never establish a session
+// for a 2FA-enabled account. Short-lived (5 minutes, enforced in
+// routes/auth.ts) and single-use (deleted the moment it's consumed,
+// success or an expiry sweep aside) — there's no periodic sweep for
+// abandoned ones since they're harmless dead rows (no session, no
+// cookie) until routes/auth.ts's own expiresAt check rejects them.
+model TwoFactorChallenge {
+  id          String   @id @default(uuid())
+  localUserId String
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  localUser LocalUser @relation(fields: [localUserId], references: [id])
 }
 
 model Community {
@@ -82,21 +337,598 @@ model Community {
   actorId     String   @unique
   title       String
   description String?
+  // "public" | "private" | "secret" — public: open join, visible
+  // everywhere. private: visible in listings/search, join requires
+  // approval. secret: same approval requirement, but hidden from
+  // listings/search unless the viewer is already a member — see
+  // routes/communities.ts and the plan for this feature.
+  privacy     String   @default("public")
   createdAt   DateTime @default(now())
 
-  actor       Actor    @relation(fields: [actorId], references: [id])
-  posts       Post[]
+  actor   Actor                 @relation(fields: [actorId], references: [id])
+  posts   Post[]
+  members CommunityMembership[]
 }
 
 model Post {
-  id            String    @id @default(uuid())
-  title         String
+  id            String   @id @default(uuid())
+  // Nullable because an incoming federated Note has no title
+  // (Mastodon-style microblogging, not this app's own Reddit-style
+  // posts) — local post creation still requires one at the Zod level
+  // (routes/posts.ts), this only relaxes the DB/AP-ingestion side.
+  title         String?
   url           String?
   body          String?
   authorActorId String
-  communityId   String
-  createdAt     DateTime  @default(now())
+  // Nullable: a null community means this Post is federated timeline
+  // content (someone we follow's post, or a reply to one of ours),
+  // cached on receipt — see routes/inbox.ts. It never belongs to any
+  // community and only shows up in GET /feed via the follow-graph
+  // branch, not postVisibilityWhere's community-relation checks.
+  communityId   String?
+  // Only meaningful for a communityId: null post ("personal note") —
+  // a community post is forced to "public" server-side regardless of
+  // what's sent (routes/posts.ts's createPostSchema), since the
+  // community's own public/private/secret tier already governs it.
+  // See postVisibilityWhere (routes/posts.ts) for how each tier gates
+  // read access and federation/activities.ts's createNoteFromPost for
+  // how each tier addresses the outgoing Create differently.
+  visibility    PostVisibility @default(public)
+  // The real ActivityPub object IRI, set only for content we cached
+  // from elsewhere rather than authored ourselves — used to dedupe
+  // redelivery and so replying/liking targets the real remote object
+  // (federation/activities.ts's postObjectIri) instead of a URL we made
+  // up for content we don't actually host.
+  remoteId      String?  @unique
+  createdAt     DateTime @default(now())
+  // Set only by an actual edit (routes/posts.ts's PATCH, or an incoming
+  // Update over federation) — deliberately not Prisma's automatic
+  // @updatedAt, which would also stamp it on creation and make "was this
+  // edited" an unreliable near-equal-timestamp comparison. null forever
+  // means never edited.
+  updatedAt     DateTime?
 
-  author        Actor     @relation(fields: [authorActorId], references: [id])
-  community     Community @relation(fields: [communityId], references: [id])
+  // Optional — set when this post is also a calendar event. Whether it
+  // shows on any particular profile's Calendar tab is a separate,
+  // per-viewer choice — see CalendarEventSave below — not tied to
+  // authorship. eventStart being non-null is what marks a post as an
+  // event; eventEnd/eventLocation are both optional add-ons.
+  eventStart    DateTime?
+  eventEnd      DateTime?
+  eventLocation String?
+
+  // Optional media attachment — at most one of the two is ever set
+  // (enforced in routes/posts.ts's createPostSchema, not the DB).
+  // imageUrl is re-encoded via saveProcessedImage same as any other
+  // uploaded image; videoUrl is stored as-is (no transcoding pipeline
+  // exists) after magic-byte validation — see routes/posts.ts's
+  // POST /posts/media. location is a free-text tag, e.g. "Carowinds",
+  // independent of either.
+  imageUrl String?
+  videoUrl String?
+  location String?
+
+  // Extracted from body at creation/edit time (local) or parsed from the
+  // incoming Note's own plain-text body the same way (federated) —
+  // federation/textEntities.ts's extractHashtagTokens, lowercase-
+  // normalized so "#Foo"/"#foo" don't split into different tags. No GIN
+  // index — Postgres array `hasSome` is a sequential scan without one,
+  // fine at this app's demo scale, same "no pagination this milestone"
+  // posture as everywhere else.
+  hashtags String[] @default([])
+  // The AP `summary` field on a Note is, despite the name, the content-
+  // warning text shown before the real content — see
+  // federation/activities.ts's createNoteFromPost. null means no CW.
+  contentWarning String?
+
+  // A post "has a poll" iff it has any PollOption rows — no separate
+  // boolean needed. pollExpiresAt null means it never expires.
+  // Federated as an ActivityPub Question (federation/activities.ts's
+  // createNoteFromPost), not a Note — a vote is itself a reply
+  // Create(Note) whose `name` matches the chosen option (routes/inbox.ts's
+  // processIncomingNote, checked before that reply would otherwise be
+  // cached as a junk Comment).
+  pollMultiple   Boolean   @default(false)
+  pollExpiresAt  DateTime?
+
+  author        Actor               @relation(fields: [authorActorId], references: [id])
+  community     Community?          @relation(fields: [communityId], references: [id])
+  comments      Comment[]
+  votes         PostVote[]
+  calendarSaves CalendarEventSave[]
+  boosts        PostBoost[]
+  reports       Report[]
+  reactions     Reaction[]
+  recipients    PostRecipient[]
+  pollOptions   PollOption[]
+  bookmarks     Bookmark[]
+  exploreCachedIn ExploreCachedPost[]
+}
+
+// Ordered options for a poll post — `position` preserves the author's
+// chosen order (not alphabetical/insert-order-by-id).
+model PollOption {
+  id       String @id @default(uuid())
+  postId   String
+  text     String
+  position Int
+
+  post  Post       @relation(fields: [postId], references: [id])
+  votes PollVote[]
+}
+
+// One row per (option, actor) — a single-select poll's "replace, don't
+// stack" rule is enforced in application code (routes/posts.ts), not
+// here; the DB only guarantees no duplicate vote for the same option.
+model PollVote {
+  id        String   @id @default(uuid())
+  optionId  String
+  actorId   String
+  createdAt DateTime @default(now())
+
+  option PollOption @relation(fields: [optionId], references: [id])
+  actor  Actor      @relation(fields: [actorId], references: [id])
+
+  @@unique([optionId, actorId])
+}
+
+enum PostVisibility {
+  public
+  followers
+  specified
+  local_only
+}
+
+// The audience list for a "specified"-visibility personal note — only
+// these actors (plus the author) can see it, regardless of follow
+// status. See postVisibilityWhere/hasCommunityAccess (routes/posts.ts).
+model PostRecipient {
+  id      String @id @default(uuid())
+  postId  String
+  actorId String
+
+  post  Post  @relation(fields: [postId], references: [id])
+  actor Actor @relation(fields: [actorId], references: [id])
+
+  @@unique([postId, actorId])
+}
+
+// One reaction slot per (actor, post) — picking a new emoji replaces the
+// old one rather than stacking (Misskey's actual semantics: a reaction
+// is a single choice per person per note, not independent toggles like
+// Slack). `emoji` is either a raw unicode character/sequence or a
+// ":shortcode:" referencing a CustomEmoji below. See routes/posts.ts's
+// PUT/DELETE /posts/:id/reactions and federation/activities.ts's
+// reactActivity for how this federates (an extended Like, not a
+// separate AP activity type).
+model Reaction {
+  id        String   @id @default(uuid())
+  postId    String
+  actorId   String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  post  Post  @relation(fields: [postId], references: [id])
+  actor Actor @relation(fields: [actorId], references: [id])
+
+  @@unique([postId, actorId])
+}
+
+// Instance-wide, admin-managed emoji (routes/customEmoji.ts) usable in
+// reactions (and potentially post text in the future, not implemented
+// yet) — not per-user, no federation-side caching of remote instances'
+// own custom emoji in this pass (see reactActivity's disclosed
+// limitation on that).
+model CustomEmoji {
+  id        String   @id @default(uuid())
+  shortcode String   @unique
+  imageUrl  String
+  createdAt DateTime @default(now())
+}
+
+// A boost/reshare (ActivityPub Announce) — one row per (actor, post),
+// used identically for an outgoing boost of a local/cached post and an
+// incoming boost recorded from a followed remote actor's Announce (see
+// routes/inbox.ts). GET /home surfaces these separately from authored
+// posts, tagged with who boosted them — see routes/posts.ts.
+model PostBoost {
+  id        String   @id @default(uuid())
+  actorId   String
+  postId    String
+  createdAt DateTime @default(now())
+
+  actor Actor @relation(fields: [actorId], references: [id])
+  post  Post  @relation(fields: [postId], references: [id])
+
+  @@unique([actorId, postId])
+}
+
+// Join table: which actors have added a given event post to their own
+// Calendar tab. Deliberately independent of Post.authorActorId — anyone
+// can save anyone else's event post to their own calendar, and the
+// author gets no special auto-save (see the plan for this feature).
+model CalendarEventSave {
+  id        String   @id @default(uuid())
+  actorId   String
+  postId    String
+  createdAt DateTime @default(now())
+
+  actor Actor @relation(fields: [actorId], references: [id])
+  post  Post  @relation(fields: [postId], references: [id])
+
+  @@unique([actorId, postId])
+}
+
+// A private "save for later" — Misskey/Mastodon call this a bookmark
+// (Misskey also calls a related-but-richer concept "clips"; this app's
+// user asked for the plain bookmark version). Same shape as
+// CalendarEventSave above, and same reasoning it's never federated:
+// a bookmark is purely local, visible only to the actor who made it,
+// nothing for a remote server to ever need to know about.
+model Bookmark {
+  id        String   @id @default(uuid())
+  actorId   String
+  postId    String
+  createdAt DateTime @default(now())
+
+  actor Actor @relation(fields: [actorId], references: [id])
+  post  Post  @relation(fields: [postId], references: [id])
+
+  @@unique([actorId, postId])
+}
+
+// A saved keyword/author filter — Misskey's "antenna": watches for
+// posts matching keywords and/or specific authors and surfaces them as
+// a dedicated live view (routes/antennas.ts's GET /antennas/:id/posts),
+// rather than a fixed feed the way a hashtag page is. Deliberately not
+// federated — like Bookmark/CalendarEventSave, it's a private lens on
+// content this instance can already see, nothing a remote server needs
+// to know about. watchedActorIds is a plain string array, not a real
+// relation — an antenna watching an actor who later gets deleted just
+// silently stops matching their (now also deleted) posts, no cascade
+// needed on that side.
+model Antenna {
+  id      String @id @default(uuid())
+  actorId String
+  name    String
+  // Case-insensitive substring match against a post's title/body — a
+  // post matches if it contains ANY of these. Empty array means
+  // "keyword filter disabled," not "matches nothing" (see
+  // routes/antennas.ts).
+  keywords String[] @default([])
+  // Non-empty means "only posts authored by one of these actors can
+  // match"; empty means any author. Populated by resolving handles the
+  // same way createPostSchema's specifiedHandles already are.
+  watchedActorIds String[] @default([])
+  createdAt       DateTime @default(now())
+
+  actor Actor @relation(fields: [actorId], references: [id])
+}
+
+// A private sticky note about someone else's profile — Misskey's
+// "memo": visible only to the person who wrote it, never to the
+// subject or anyone else (e.g. "met at a conference in 2024," "confirm
+// before lending anything"). One per (author, subject) pair — writing
+// a new one replaces the old, same "one slot, not a running list"
+// posture as Reaction. Deliberately not federated: this is strictly
+// local, private information about a profile, nothing a remote server
+// or even the subject themselves has any business seeing.
+model ProfileMemo {
+  id        String   @id @default(uuid())
+  authorActorId  String
+  subjectActorId String
+  body      String
+  updatedAt DateTime @updatedAt
+
+  author  Actor @relation("ProfileMemoAuthor", fields: [authorActorId], references: [id])
+  subject Actor @relation("ProfileMemoSubject", fields: [subjectActorId], references: [id])
+
+  @@unique([authorActorId, subjectActorId])
+}
+
+model Comment {
+  id            String   @id @default(uuid())
+  postId        String
+  authorActorId String
+  parentId      String?
+  body          String
+  // Set only for a reply we received from a remote actor via inbox —
+  // dedupes redelivery, same purpose as Post.remoteId.
+  remoteId      String?  @unique
+  createdAt     DateTime @default(now())
+
+  post    Post          @relation(fields: [postId], references: [id])
+  author  Actor         @relation(fields: [authorActorId], references: [id])
+  parent  Comment?      @relation("CommentReplies", fields: [parentId], references: [id])
+  replies Comment[]     @relation("CommentReplies")
+  votes   CommentVote[]
+  reports Report[]
+}
+
+model PostVote {
+  id        String   @id @default(uuid())
+  postId    String
+  actorId   String
+  value     Int
+  createdAt DateTime @default(now())
+
+  post  Post  @relation(fields: [postId], references: [id])
+  actor Actor @relation(fields: [actorId], references: [id])
+
+  @@unique([postId, actorId])
+}
+
+model CommentVote {
+  id        String   @id @default(uuid())
+  commentId String
+  actorId   String
+  value     Int
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id])
+  actor   Actor   @relation(fields: [actorId], references: [id])
+
+  @@unique([commentId, actorId])
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  participants ConversationParticipant[]
+  messages     Message[]
+}
+
+model ConversationParticipant {
+  id             String    @id @default(uuid())
+  conversationId String
+  actorId        String
+  lastReadAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  actor        Actor        @relation(fields: [actorId], references: [id])
+
+  @@unique([conversationId, actorId])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  senderActorId  String
+  body           String
+  // Set only for a DM we received from a remote actor via inbox —
+  // dedupes redelivery, same purpose as Post.remoteId/Comment.remoteId.
+  // Unlike those, this app never exposes a GET route to dereference a
+  // message's own object IRI (federation/activities.ts's
+  // messageObjectIri) — a DM is pushed whole via Create, exactly once,
+  // never re-fetched by anyone, including us.
+  remoteId       String?  @unique
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  sender       Actor        @relation(fields: [senderActorId], references: [id])
+}
+
+// Self-hosted (CalDAV) calendar connection — credentials live here, not on
+// Actor, so they're structurally out of the response path GET
+// /profile/:username uses. Never serialized in any API response (same
+// write-only convention as LocalUser.passwordHash). No at-rest encryption
+// yet — disclosed limitation, see the plan for this feature.
+model CalendarConnection {
+  id       String @id @default(uuid())
+  actorId  String @unique
+  provider String @default("caldav") // "caldav" | "ical"
+
+  // CalDAV (present when provider = "caldav"). serverUrl is also reused
+  // to hold the feed URL when provider = "ical" — same "where do we fetch
+  // calendar data from" concept, one fewer migration.
+  serverUrl    String?
+  username     String?
+  appPassword  String?
+  calendarPath String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  actor Actor @relation(fields: [actorId], references: [id])
+}
+
+// Album visibility gates whether the album is visible at all to a
+// non-owner; Photo.visibility only narrows further within an already-
+// visible (public) album — null means "inherit the album's visibility."
+// See routes/photos.ts for the exact filtering logic.
+model Album {
+  id          String   @id @default(uuid())
+  actorId     String
+  title       String
+  description String?
+  visibility  String   @default("private") // "public" | "private"
+  createdAt   DateTime @default(now())
+
+  actor  Actor   @relation(fields: [actorId], references: [id])
+  photos Photo[]
+}
+
+model Photo {
+  id      String @id @default(uuid())
+  albumId String
+  // Denormalized owner — avoids joining through Album for every
+  // visibility check.
+  actorId String
+
+  imageUrl     String
+  thumbnailUrl String
+  caption      String?
+  visibility   String? // "public" | "private" | null = inherit Album's
+
+  createdAt DateTime @default(now())
+
+  album Album @relation(fields: [albumId], references: [id])
+  actor Actor @relation(fields: [actorId], references: [id])
+}
+
+enum ReportStatus {
+  open
+  resolved
+}
+
+// targetActorId is always set (a report is fundamentally "report this
+// actor") — targetPostId/targetCommentId optionally pin the specific
+// content that prompted it. Created both locally (POST /reports) and
+// from an incoming ActivityPub Flag (routes/inbox.ts) — one row shape,
+// one admin queue, regardless of which server the report came from.
+model Report {
+  id              String       @id @default(uuid())
+  reporterId      String
+  targetActorId   String
+  targetPostId    String?
+  targetCommentId String?
+  reason          String
+  status          ReportStatus @default(open)
+  createdAt       DateTime     @default(now())
+
+  reporter Actor    @relation("Reporter", fields: [reporterId], references: [id])
+  target   Actor    @relation("ReportedActor", fields: [targetActorId], references: [id])
+  post     Post?    @relation(fields: [targetPostId], references: [id])
+  comment  Comment? @relation(fields: [targetCommentId], references: [id])
+}
+
+// Optional connection to a self-hosted Immich server — credentials live
+// here, not on Actor, same structural isolation as CalendarConnection.
+// Never serialized (see routes/photos.ts's status endpoint, which
+// returns only { connected, serverUrl }).
+model ImmichConnection {
+  id        String   @id @default(uuid())
+  actorId   String   @unique
+  serverUrl String
+  apiKey    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  actor Actor @relation(fields: [actorId], references: [id])
+}
+
+enum DeliveryStatus {
+  pending
+  failed
+}
+
+// A queued retry for a signed delivery that failed on its first
+// immediate attempt (federation/deliver.ts's deliverActivity) — this
+// app's in-process substitute for a real job queue (no Redis/worker
+// process here, so a periodic setInterval sweep — federation/
+// deliveryQueue.ts — reads rows due for retry directly out of Postgres).
+// actorId, not a copy of the private key, so a retry always re-signs
+// with the actor's current row. Deleted on a successful retry; past
+// the retry cap (deliveryQueue.ts's own attempt-count logic) status
+// flips to `failed` and the sweep stops touching it — no infinite
+// retry, no dead-letter UI this pass, inspectable via direct DB access
+// only, same as other admin-less internals in this app.
+model OutboundDelivery {
+  id            String         @id @default(uuid())
+  actorId       String
+  inboxUrl      String
+  activity      Json
+  attempts      Int            @default(0)
+  nextAttemptAt DateTime
+  lastError     String?
+  status        DeliveryStatus @default(pending)
+  createdAt     DateTime       @default(now())
+
+  actor Actor @relation(fields: [actorId], references: [id])
+}
+
+enum DirectoryLinkCategory {
+  people
+  servers
+  developer
+}
+
+// External fediverse-discovery links shown on /search (people/servers)
+// and /admin (developer) — there's no crawled index of the fediverse
+// for this app to query itself, so "browse more of it" means linking
+// out to independent third-party directory sites. Admin-managed
+// (routes/directoryLinks.ts), not hardcoded — url is unique so the
+// same site can't be entered twice.
+model FediverseDirectoryLink {
+  id          String                @id @default(uuid())
+  name        String
+  url         String                @unique
+  description String
+  category    DirectoryLinkCategory
+  createdAt   DateTime              @default(now())
+}
+
+// Instance-level moderation's real lever — defederating a whole remote
+// server, not just one Actor (that's the existing per-user Block
+// model). Enforced at every "start trusting new activity from this
+// domain" choke point: routes/inbox.ts rejects incoming activities from
+// a blocked domain before even resolving the sender's key,
+// federation/remoteActor.ts's discoverActor refuses to webfinger-
+// discover a new actor there, federation/remotePost.ts's
+// resolveAndCacheRemotePost refuses to pull a not-yet-cached post from
+// there (closing the "paste a URL" backdoor around inbox rejection),
+// and federation/deliver.ts's deliverActivity (plus deliveryQueue.ts's
+// retry sweep) refuses to send there. Disclosed limitation, same
+// posture as the per-actor Block model's own comment: this doesn't
+// retroactively purge already-cached posts/actors from that domain or
+// existing Follow rows — it stops new traffic in both directions from
+// this point on, not a full historical scrub.
+model DomainBlock {
+  id        String   @id @default(uuid())
+  domain    String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+// Host-curated list of remote servers users can browse trending/public
+// content from (routes/explore.ts) — deliberately not a "type any
+// domain" free-for-all: fetching a remote server's public timeline is
+// an unauthenticated request this instance makes on the viewer's
+// behalf, so which domains that can target is admin-gated the same way
+// relay subscriptions already are, rather than an open URL-fetch proxy
+// keyed on whatever a logged-in user types.
+model ExploreServer {
+  id        String   @id @default(uuid())
+  domain    String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+
+  subscriptions ExploreSubscription[]
+  cachedPosts   ExploreCachedPost[]
+}
+
+// A viewer opting an Explore server into background polling
+// (federation/exploreSweep.ts) — the difference between visiting
+// Explore on demand (a live, uncached read) and having its trending
+// posts actually show up in your own feed over time.
+model ExploreSubscription {
+  id        String   @id @default(uuid())
+  actorId   String
+  serverId  String
+  createdAt DateTime @default(now())
+
+  actor  Actor         @relation(fields: [actorId], references: [id])
+  server ExploreServer @relation(fields: [serverId], references: [id])
+
+  @@unique([actorId, serverId])
+}
+
+// One row per (server, post) the sweep resolved+cached from that
+// server's trending timeline — not the same as "authored on that
+// domain" (a server's trending list routinely surfaces posts from
+// other instances entirely, boosts especially), so this is the only
+// reliable link back to "which subscription made this post show up."
+// GET /explore/feed joins through here, not through Post.author.domain.
+model ExploreCachedPost {
+  id           String   @id @default(uuid())
+  serverId     String
+  postId       String
+  discoveredAt DateTime @default(now())
+
+  server ExploreServer @relation(fields: [serverId], references: [id])
+  post   Post          @relation(fields: [postId], references: [id])
+
+  @@unique([serverId, postId])
 }
