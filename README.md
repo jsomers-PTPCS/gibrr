@@ -4,10 +4,11 @@ A federated social platform: a Reddit/Lemmy-style feed combined with a
 Facebook/Friendica-style profile, built on [ActivityPub](https://www.w3.org/TR/activitypub/)
 so it federates with Mastodon, Lemmy, Friendica, and the rest of the fediverse.
 
-This is an early scaffold: a working federation skeleton (WebFinger, Actor
-profile, signed inbox handling a `Follow` activity) plus a placeholder web
-frontend. Posts, comments, votes, communities, and outbox delivery are not
-built yet — see "Status" below.
+Auth, posts/comments/votes, communities/groups, follows and friends,
+direct messages, photos/albums, calendar sync, a full admin panel,
+search, and a trending/explore feature for browsing other
+Mastodon-API-compatible servers are all built — see [DEPLOY.md](DEPLOY.md)
+to run your own instance.
 
 ## Stack
 
@@ -71,10 +72,12 @@ Note: full external federation (e.g. following `testuser@localhost` from a
 real Mastodon instance) isn't testable without a public domain and TLS —
 that's the natural next milestone once real feed/profile features exist.
 
-## Status / what's not built yet
+## Deploying your own instance
 
-- Auth / login
-- Posts, comments, votes, communities (the actual feed + profile features)
-- Outbox activity delivery to remote servers, and a real job queue
-- Following *from* Gibrr (currently only handles inbound `Follow`)
-- Broader ActivityPub activity coverage (`Create`, `Like`, `Announce`, `Undo`, …)
+See [DEPLOY.md](DEPLOY.md) — a one-command Docker installer
+(`./install.sh`) builds the app, stands up Postgres, and fronts
+everything with Caddy for automatic HTTPS. That's what people
+downloading this repo to self-host should use, not the dev instructions
+above (those run everything unbuilt, without TLS, for working on the
+code itself).
+

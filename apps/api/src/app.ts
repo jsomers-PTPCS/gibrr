@@ -48,6 +48,17 @@ declare global {
 export function createApp() {
   const app = express();
 
+  // Real deployments sit behind a reverse proxy (Caddy/nginx terminating
+  // TLS) — without this, express-rate-limit refuses to start (it treats a
+  // present X-Forwarded-For as spoofable when the app hasn't explicitly
+  // opted into trusting it) and req.ip would resolve to the proxy's
+  // address for every request instead of the real client's. "1" trusts
+  // exactly one hop, matching the single reverse-proxy topology docker
+  // deploy/ sets up — not a bare `true`, which would trust the whole chain.
+  if (process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
+
   // The web app runs on a different origin in dev (localhost:3000 vs
   // localhost:4000); browsers enforce CORS on that fetch regardless of curl
   // working fine. Federation requests (server-to-server) aren't affected by
