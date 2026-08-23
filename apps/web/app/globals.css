@@ -930,16 +930,13 @@ select.input:focus {
 }
 
 @media (max-width: 640px) {
+  /* Removes .tab-menu from the box model entirely — its child (the
+     trigger button) becomes a direct flex item of whichever actions
+     column it's rendered inside (page.tsx), inheriting that column's
+     gap for equal, content-independent spacing instead of a
+     margin-top guessed for one specific name/handle length. */
   .tab-menu {
-    display: flex;
-    justify-content: flex-end;
-    position: relative;
-    padding: 0 1rem 0.75rem;
-    /* Pulls the trigger up out of its own row and into vertical
-       alignment with Settings/Log out — its bottom edge should land at
-       the same height as the bottom of the name/handle block, not sit
-       in a separate row below it. */
-    margin-top: -1.7rem;
+    display: contents;
   }
   .tab-menu-trigger {
     display: inline-flex;

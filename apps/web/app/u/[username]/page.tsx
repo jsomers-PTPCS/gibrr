@@ -290,6 +290,56 @@ export default function ProfilePage() {
   // with a null "custom background" input.
   const profileCardStyle = boxStyle(null, "card", theme, profile.actor.fontColor);
 
+  // Mobile-only "⋮" tab menu — a compact trigger naming the current tab
+  // plus a button that opens the same list as a dropdown, replacing the
+  // desktop tab strip which doesn't fit a phone's width. Rendered as a
+  // real child of whichever actions column exists (Settings/Log out for
+  // the owner, Friend/Follow/etc. for a visitor) rather than a separate
+  // row positioned by a guessed offset — .tab-menu is display: contents
+  // on mobile (see globals.css), so it just becomes a third item in that
+  // column's flex layout and inherits the same gap, giving it equal,
+  // content-independent spacing instead of a margin-top tuned for one
+  // specific name/handle length that broke for any other.
+  const tabMenuElement = (
+    <div className="tab-menu">
+      <button
+        ref={tabMenuTriggerRef}
+        type="button"
+        className="btn btn-ghost tab-menu-trigger"
+        onClick={() => setTabMenuOpen((open) => !open)}
+        aria-haspopup="true"
+        aria-expanded={tabMenuOpen}
+      >
+        {tabItems.find((t) => t.key === tab)?.label}
+        <span aria-hidden>⋮</span>
+      </button>
+      {tabMenuOpen &&
+        tabMenuPos &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={tabMenuDropdownRef}
+            className="card tab-menu-dropdown"
+            style={{ position: "fixed", top: tabMenuPos.top, right: tabMenuPos.right }}
+          >
+            {tabItems.map((item) => (
+              <button
+                key={item.key}
+                className={item.key === tab ? "active" : undefined}
+                onClick={() => {
+                  setTab(item.key);
+                  setTabMenuOpen(false);
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+
   return (
     <div style={{ ...pageBackgroundStyle, minHeight: "100vh" }}>
     <main className="page-wide" style={fontStyle}>
@@ -428,6 +478,7 @@ export default function ProfilePage() {
               <button onClick={handleLogout} className="btn btn-ghost">
                 Log out
               </button>
+              {tabMenuElement}
             </div>
           )}
           {me && !isOwnProfile && (
@@ -441,8 +492,12 @@ export default function ProfilePage() {
               <button onClick={handleMessage} disabled={messaging} className="btn btn-accent">
                 {messaging ? "…" : "Whisper"}
               </button>
+              {tabMenuElement}
             </div>
           )}
+          {/* A logged-out visitor gets neither actions column above, so
+              the tab menu needs its own place to render. */}
+          {!me && tabMenuElement}
         </div>
         {messageError && (
           <p className="error-text" style={{ padding: "0 1.5rem" }}>
@@ -473,46 +528,6 @@ export default function ProfilePage() {
             </button>
           ))}
         </nav>
-
-        {/* Mobile-only equivalent — a compact trigger naming the current
-            tab plus a "⋮" button that opens the same list as a dropdown. */}
-        <div className="tab-menu">
-          <button
-            ref={tabMenuTriggerRef}
-            type="button"
-            className="btn btn-ghost tab-menu-trigger"
-            onClick={() => setTabMenuOpen((open) => !open)}
-            aria-haspopup="true"
-            aria-expanded={tabMenuOpen}
-          >
-            {tabItems.find((t) => t.key === tab)?.label}
-            <span aria-hidden>⋮</span>
-          </button>
-          {tabMenuOpen &&
-            tabMenuPos &&
-            typeof document !== "undefined" &&
-            createPortal(
-              <div
-                ref={tabMenuDropdownRef}
-                className="card tab-menu-dropdown"
-                style={{ position: "fixed", top: tabMenuPos.top, right: tabMenuPos.right }}
-              >
-                {tabItems.map((item) => (
-                  <button
-                    key={item.key}
-                    className={item.key === tab ? "active" : undefined}
-                    onClick={() => {
-                      setTab(item.key);
-                      setTabMenuOpen(false);
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>,
-              document.body,
-            )}
-        </div>
       </div>
 
       {/* Two-column body: Intro sidebar + content */}
