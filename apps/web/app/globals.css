@@ -194,6 +194,18 @@ button {
     font-size: 0.7rem;
   }
 
+  /* Feed's "What's on your mind" composer-opener (app/page.tsx) — a
+     smaller size means more of the placeholder (name included) fits
+     before the ellipsis truncation kicks in. "input.composer-…" (not
+     just ".composer-…") for the specificity bump: this rule sits
+     earlier in the file than .input's own font-size, and a plain class
+     selector ties with .input's — so without the extra element-type
+     selector, source order would let .input win regardless of this
+     media query. */
+  input.composer-title-input {
+    font-size: 0.85rem;
+  }
+
   /* Profile header row: avatar + name-block + Settings/Log out normally
      share one flex row, but the 128px avatar alone eats most of a
      phone's width, pushing Settings/Log out onto their own line below

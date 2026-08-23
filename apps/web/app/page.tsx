@@ -55,7 +55,7 @@ export default function HomePage() {
               preset={me.actor.avatarPreset}
             />
             <input
-              className="input"
+              className="input composer-title-input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onFocus={() => setComposerOpen(true)}
