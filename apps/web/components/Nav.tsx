@@ -111,15 +111,11 @@ export function Nav() {
         GIBRR
       </Link>
 
-      {/* Hidden on mobile — the bottom tab bar (BottomTabBar.tsx) has its
+      {/* Hidden on mobile (display:flex lives in the .nav-loops-icon CSS
+          rule, not inline, so the mobile media query can actually
+          override it) — the bottom tab bar (BottomTabBar.tsx) has its
           own Loops icon there instead. */}
-      <Link
-        href="/loops"
-        aria-label="Loops"
-        title="Loops"
-        className="nav-loops-icon"
-        style={{ display: "flex", alignItems: "center", color: "var(--text)" }}
-      >
+      <Link href="/loops" aria-label="Loops" title="Loops" className="nav-loops-icon">
         <LoopsIcon width={24} height={24} />
       </Link>
 
@@ -134,11 +130,10 @@ export function Nav() {
       </button>
 
       <div className={`nav-links${mobileOpen ? " nav-links-open" : ""}`}>
-        <Link href="/federated" style={{ whiteSpace: "nowrap" }} onClick={() => setMobileOpen(false)}>
-          Federated
-        </Link>
-
-        <Link href="/g" style={{ whiteSpace: "nowrap" }} onClick={() => setMobileOpen(false)}>
+        {/* Hidden in the mobile hamburger — the bottom tab bar
+            (BottomTabBar.tsx) has its own Circles icon there instead.
+            Still shown inline on desktop, which has no bottom tab bar. */}
+        <Link href="/g" className="nav-circles-link" style={{ whiteSpace: "nowrap" }} onClick={() => setMobileOpen(false)}>
           Circles
         </Link>
 
@@ -158,6 +153,10 @@ export function Nav() {
             style={{ width: "100%" }}
           />
         </form>
+
+        <Link href="/federated" style={{ whiteSpace: "nowrap" }} onClick={() => setMobileOpen(false)}>
+          Federated
+        </Link>
       </div>
 
       <div className="nav-spacer" />

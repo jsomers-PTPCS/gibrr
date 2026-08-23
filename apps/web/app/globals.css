@@ -317,6 +317,12 @@ select.input:focus {
   display: none;
 }
 
+.nav-loops-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text);
+}
+
 @media (max-width: 720px) {
   .nav {
     flex-wrap: wrap;
@@ -343,9 +349,10 @@ select.input:focus {
     display: flex;
   }
 
-  /* Loops has its own icon in the bottom tab bar on mobile (see
-     .bottom-tab-bar below) — no need for it twice. */
-  .nav-loops-icon {
+  /* Loops and Circles both have their own icon in the bottom tab bar on
+     mobile (see .bottom-tab-bar below) — no need for either twice. */
+  .nav-loops-icon,
+  .nav-circles-link {
     display: none;
   }
 
