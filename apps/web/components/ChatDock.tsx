@@ -15,7 +15,7 @@ import {
 import { Avatar } from "./Avatar";
 import { MessageIcon } from "./MessageIcon";
 import { timeAgo } from "../lib/timeAgo";
-import { onOpenChatDock } from "../lib/chatDock";
+import { onOpenChatDock, onOpenChatDockList } from "../lib/chatDock";
 
 const LIST_POLL_MS = 10000;
 const THREAD_POLL_MS = 3000;
@@ -79,6 +79,12 @@ export function ChatDock() {
       setMessages("loading");
       setView("thread");
     });
+  }, []);
+
+  // Nav.tsx's bottom tab bar Messenger icon (mobile) — no specific
+  // conversation, just open the list the way the corner launcher does.
+  useEffect(() => {
+    return onOpenChatDockList(() => setView("list"));
   }, []);
 
   async function handleSend(e: FormEvent) {

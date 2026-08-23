@@ -110,3 +110,26 @@ export function FlagIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+// Nav.tsx's bottom tab bar (mobile only) — Home tab.
+export function HomeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M3 11 12 4l9 7" />
+      <path d="M5 10v10h14V10" />
+    </Icon>
+  );
+}
+
+// Nav.tsx's bottom tab bar (mobile only) — Circles ("/g") tab. Two
+// overlapping heads, distinct from Avatar's single-person glyph.
+export function CirclesIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="9" cy="9" r="3.5" />
+      <circle cx="16" cy="11" r="3" />
+      <path d="M3.5 19c.6-3 3-5 5.5-5s4.9 2 5.5 5" />
+      <path d="M14.5 14.3c2 .3 3.7 2 4.2 4.4" />
+    </Icon>
+  );
+}

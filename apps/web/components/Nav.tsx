@@ -75,6 +75,7 @@ export function Nav() {
       await switchAccount(actorId);
       refresh();
       setSwitcherOpen(false);
+      setMobileOpen(false);
     } finally {
       setSwitching(null);
     }
@@ -89,6 +90,7 @@ export function Nav() {
     await logout();
     refresh();
     setSwitcherOpen(false);
+    setMobileOpen(false);
     router.push("/");
   }
 
@@ -109,7 +111,15 @@ export function Nav() {
         GIBRR
       </Link>
 
-      <Link href="/loops" aria-label="Loops" title="Loops" style={{ display: "flex", alignItems: "center", color: "var(--text)" }}>
+      {/* Hidden on mobile — the bottom tab bar (BottomTabBar.tsx) has its
+          own Loops icon there instead. */}
+      <Link
+        href="/loops"
+        aria-label="Loops"
+        title="Loops"
+        className="nav-loops-icon"
+        style={{ display: "flex", alignItems: "center", color: "var(--text)" }}
+      >
         <LoopsIcon width={24} height={24} />
       </Link>
 
@@ -151,7 +161,11 @@ export function Nav() {
       </div>
 
       <div className="nav-spacer" />
-      <div className="nav-account">
+      {/* On mobile this collapses into the hamburger panel alongside
+          .nav-links instead of sitting in the top-right corner — see the
+          .nav-account media query in globals.css. Shares mobileOpen with
+          .nav-links so both open/close together. */}
+      <div className={`nav-account${mobileOpen ? " nav-account-open" : ""}`}>
       {me === "loading" ? null : me ? (
         <>
           <div ref={switcherRef} style={{ position: "relative" }}>
@@ -183,7 +197,10 @@ export function Nav() {
               >
                 <Link
                   href={`/u/${me.actor.username}`}
-                  onClick={() => setSwitcherOpen(false)}
+                  onClick={() => {
+                    setSwitcherOpen(false);
+                    setMobileOpen(false);
+                  }}
                   style={{ display: "block", padding: "0.4rem 0.5rem", color: "inherit" }}
                 >
                   Me
@@ -242,7 +259,10 @@ export function Nav() {
                 <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "0.4rem 0" }} />
                 <Link
                   href="/login"
-                  onClick={() => setSwitcherOpen(false)}
+                  onClick={() => {
+                    setSwitcherOpen(false);
+                    setMobileOpen(false);
+                  }}
                   style={{ display: "block", padding: "0.4rem 0.5rem", color: "inherit" }}
                 >
                   + Add another account
@@ -269,8 +289,10 @@ export function Nav() {
         </>
       ) : (
         <>
-          <Link href="/login">Log in</Link>
-          <Link href="/register" className="btn btn-primary">
+          <Link href="/login" onClick={() => setMobileOpen(false)}>
+            Log in
+          </Link>
+          <Link href="/register" className="btn btn-primary" onClick={() => setMobileOpen(false)}>
             Register
           </Link>
         </>

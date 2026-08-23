@@ -146,6 +146,22 @@ button {
   margin-bottom: 1rem;
 }
 
+/* Less wasted horizontal space around post cards on a phone screen —
+   the desktop side padding just eats width that phone screens don't
+   have to spare. */
+@media (max-width: 640px) {
+  .page,
+  .page-wide {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  .card {
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+  }
+}
+
 /* Buttons */
 
 .btn {
@@ -326,8 +342,26 @@ select.input:focus {
   .nav-links.nav-links-open {
     display: flex;
   }
+
+  /* Loops has its own icon in the bottom tab bar on mobile (see
+     .bottom-tab-bar below) — no need for it twice. */
+  .nav-loops-icon {
+    display: none;
+  }
+
+  /* Profile/account moves into the hamburger panel instead of sitting in
+     the top-right corner — shares mobileOpen with .nav-links above so
+     both open/close together (Nav.tsx passes the same state to both). */
   .nav-account {
-    order: 3;
+    order: 5;
+    flex-basis: 100%;
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  .nav-account.nav-account-open {
+    display: flex;
   }
 }
 
@@ -688,6 +722,70 @@ select.input:focus {
   padding: 0.6rem;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+/* Bottom tab bar (BottomTabBar.tsx) — mobile only, same breakpoint as
+   Nav's hamburger collapse so the two always change together. Replaces
+   the corner chat-dock launcher (hidden below) and the top nav's Loops
+   icon (hidden above) as the way to reach those destinations. */
+.bottom-tab-bar {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .bottom-tab-bar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 90;
+    justify-content: space-around;
+    align-items: center;
+    background: var(--nav-bg);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--border);
+    padding: 0.4rem 0.5rem calc(0.4rem + env(safe-area-inset-bottom));
+  }
+
+  .bottom-tab-bar a,
+  .bottom-tab-bar button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.3rem 0.75rem;
+    cursor: pointer;
+  }
+
+  .bottom-tab-bar .bottom-tab-active {
+    color: var(--accent);
+  }
+
+  /* Room for the fixed bottom tab bar so it doesn't cover the last
+     post/card in the page. */
+  .page,
+  .page-wide {
+    padding-bottom: 6rem;
+  }
+
+  /* The bottom tab bar's Messenger icon is the mobile entry point now. */
+  .chat-dock-launcher {
+    display: none;
+  }
+
+  .chat-dock-panel {
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: calc(4.25rem + env(safe-area-inset-bottom));
+    width: auto;
+    max-height: calc(100vh - 6rem);
+  }
 }
 
 /* Underline tab strip (Facebook-profile-style, as opposed to the pill

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { Orbitron, Inter } from "next/font/google";
 import { Nav } from "../components/Nav";
+import { BottomTabBar } from "../components/BottomTabBar";
 import { ChatDock } from "../components/ChatDock";
 import { ConfirmDialogProvider } from "../components/ConfirmDialog";
 import { PwaRegister } from "../components/PwaRegister";
@@ -64,6 +65,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Link href="/terms">Terms</Link> · <Link href="/privacy">Privacy</Link>
           </footer>
           <ChatDock />
+          <BottomTabBar />
         </ConfirmDialogProvider>
       </body>
     </html>

@@ -19,3 +19,16 @@ export function onOpenChatDock(handler: (detail: OpenChatDetail) => void): () =>
   window.addEventListener(OPEN_EVENT, listener);
   return () => window.removeEventListener(OPEN_EVENT, listener);
 }
+
+// Same idea, but for the bottom tab bar's Messenger icon (Nav.tsx) — it
+// just wants the conversation list open, not any particular thread.
+const OPEN_LIST_EVENT = "gibrr:open-chat-list";
+
+export function openChatDockList() {
+  window.dispatchEvent(new Event(OPEN_LIST_EVENT));
+}
+
+export function onOpenChatDockList(handler: () => void): () => void {
+  window.addEventListener(OPEN_LIST_EVENT, handler);
+  return () => window.removeEventListener(OPEN_LIST_EVENT, handler);
+}
