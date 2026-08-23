@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "uk.somershome.gibrr.twa",
+      "sha256_cert_fingerprints": [
+        "3D:92:F5:6E:D6:E8:89:2C:D1:5B:64:81:C0:59:27:F0:61:E8:04:9A:24:26:37:97:F9:EA:BF:0F:8E:75:D6:28"
+      ]
+    }
+  }
+]
