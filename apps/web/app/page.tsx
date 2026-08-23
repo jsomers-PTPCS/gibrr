@@ -54,14 +54,28 @@ export default function HomePage() {
               imageUrl={me.actor.avatarImageUrl}
               preset={me.actor.avatarPreset}
             />
-            <textarea
+            <input
               className="input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onFocus={() => setComposerOpen(true)}
               placeholder={`What's on your mind, ${me.actor.displayName ?? me.actor.username}?`}
-              rows={1}
-              style={{ flex: 1, borderRadius: "1.25rem", resize: "none", overflow: "hidden" }}
+              // A single-line input, not the textarea the open composer
+              // uses below (which needs to wrap a long typed title) —
+              // this field is just a clickable affordance that opens
+              // that composer on focus, so its own value is never
+              // really seen being typed into. text-overflow: ellipsis
+              // doesn't apply to <textarea> in any browser, so a long
+              // placeholder (name included) either got clipped hard mid-
+              // character or, wrapped, had its second line sliced off by
+              // the fixed single-row height — an <input> truncates with
+              // an actual "…" instead.
+              style={{
+                flex: 1,
+                minWidth: 0,
+                borderRadius: "1.25rem",
+                textOverflow: "ellipsis",
+              }}
             />
           </div>
         </div>
