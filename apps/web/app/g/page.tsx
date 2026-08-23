@@ -283,7 +283,7 @@ export default function GroupsPage() {
         </form>
       )}
 
-      <div style={{ display: "flex", gap: "0.5rem", margin: "1rem 0" }}>
+      <div className="circle-tabs" style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", margin: "1rem 0" }}>
         <button
           className={`btn ${tab === "discover" ? "btn-primary" : "btn-ghost"}`}
           onClick={() => setTab("discover")}

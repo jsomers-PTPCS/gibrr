@@ -160,6 +160,19 @@ button {
     padding-left: 0.85rem;
     padding-right: 0.85rem;
   }
+
+  /* Circles page's Discover/My Circles/Explore/Watching row (app/g/
+     page.tsx) — at the default .btn size these four don't fit a phone's
+     width, and "Watching" gets clipped off-screen entirely (the row
+     wraps as a backstop, but shrinking first means it usually doesn't
+     need to). */
+  .circle-tabs {
+    gap: 0.3rem;
+  }
+  .circle-tabs .btn {
+    padding: 0.25rem 0.45rem;
+    font-size: 0.7rem;
+  }
 }
 
 /* Buttons */
