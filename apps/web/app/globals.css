@@ -935,11 +935,19 @@ select.input:focus {
     justify-content: flex-end;
     position: relative;
     padding: 0 1rem 0.75rem;
+    /* Pulls the trigger up out of its own row and into vertical
+       alignment with Settings/Log out — its bottom edge should land at
+       the same height as the bottom of the name/handle block, not sit
+       in a separate row below it. */
+    margin-top: -1.7rem;
   }
   .tab-menu-trigger {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
+    /* Same size as Settings/Log out (.profile-owner-actions .btn). */
+    padding: 0.25rem 0.5rem;
+    font-size: 0.7rem;
   }
   /* position/top/left are set inline (page.tsx) from the trigger
      button's measured rect — the dropdown is portaled to document.body,
