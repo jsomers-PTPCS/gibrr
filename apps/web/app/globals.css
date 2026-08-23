@@ -931,7 +931,8 @@ select.input:focus {
 
 @media (max-width: 640px) {
   .tab-menu {
-    display: block;
+    display: flex;
+    justify-content: flex-end;
     position: relative;
     padding: 0 1rem 0.75rem;
   }
