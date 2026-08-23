@@ -58,6 +58,17 @@
   box-sizing: border-box;
 }
 
+/* Nearly every size in this file is in rem, so bumping the root size on
+   narrow screens (phones, and the Android TWA wrapper) scales post text,
+   timestamps, and card padding together — otherwise the feed reads as
+   uniformly small on a phone screen even though nothing is technically
+   misconfigured. Desktop keeps the browser default. */
+@media (max-width: 640px) {
+  html {
+    font-size: 19px;
+  }
+}
+
 html,
 body {
   padding: 0;
