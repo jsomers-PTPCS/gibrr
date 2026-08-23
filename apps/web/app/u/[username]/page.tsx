@@ -90,19 +90,33 @@ export default function ProfilePage() {
   // corners) that would otherwise clip the dropdown — so its position
   // is computed from the trigger button's rect instead of plain CSS.
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
-  const [tabMenuPos, setTabMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const [tabMenuPos, setTabMenuPos] = useState<{ top: number; right: number; width?: number } | null>(
+    null,
+  );
   const tabMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const tabMenuDropdownRef = useRef<HTMLDivElement>(null);
+  const logoutButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!tabMenuOpen) return;
-    const rect = tabMenuTriggerRef.current?.getBoundingClientRect();
-    // Pinned to a fixed inset from the screen's right edge rather than
-    // the trigger's own position — the trigger sits near the *left* of
-    // the header (where the tab strip always started), so anchoring the
-    // dropdown to its rect kept pulling the menu toward the left edge
-    // (or, anchored to the trigger's right edge, straight off-screen).
-    if (rect) setTabMenuPos({ top: rect.bottom + 4, right: 16 });
+    // Anchored to the Log out button when it exists (own profile) —
+    // underneath it, same width, matching that corner of the header
+    // instead of a generic screen-edge inset. A visitor's profile has
+    // no Log out button, so it falls back to a fixed inset from the
+    // trigger's own row (the trigger sits near the *left* of the
+    // header, where the tab strip always started, so anchoring to
+    // *its* rect pulled the menu toward the left edge instead).
+    const logoutRect = logoutButtonRef.current?.getBoundingClientRect();
+    if (logoutRect) {
+      setTabMenuPos({
+        top: logoutRect.bottom + 4,
+        right: window.innerWidth - logoutRect.right,
+        width: logoutRect.width,
+      });
+      return;
+    }
+    const triggerRect = tabMenuTriggerRef.current?.getBoundingClientRect();
+    if (triggerRect) setTabMenuPos({ top: triggerRect.bottom + 4, right: 16 });
   }, [tabMenuOpen]);
 
   useEffect(() => {
@@ -428,7 +442,7 @@ export default function ProfilePage() {
               <Link href="/settings" className="btn btn-ghost">
                 Settings
               </Link>
-              <button onClick={handleLogout} className="btn btn-ghost">
+              <button ref={logoutButtonRef} onClick={handleLogout} className="btn btn-ghost">
                 Log out
               </button>
             </div>
@@ -498,7 +512,12 @@ export default function ProfilePage() {
               <div
                 ref={tabMenuDropdownRef}
                 className="card tab-menu-dropdown"
-                style={{ position: "fixed", top: tabMenuPos.top, right: tabMenuPos.right }}
+                style={{
+                  position: "fixed",
+                  top: tabMenuPos.top,
+                  right: tabMenuPos.right,
+                  ...(tabMenuPos.width ? { width: tabMenuPos.width, minWidth: 0 } : {}),
+                }}
               >
                 {tabItems.map((item) => (
                   <button
