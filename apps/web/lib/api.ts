@@ -297,31 +297,6 @@ export function disableTwoFactor(password: string) {
   return apiFetch<void>("/auth/2fa/disable", { method: "POST", body: JSON.stringify({ password }) });
 }
 
-// Account switcher — every account signed in on this browser at once.
-// See auth/session.ts's session-pool cookie for how this is tracked
-// server-side.
-export interface SessionAccount {
-  actor: ActorSummary & {
-    id: string;
-    avatarImageUrl: string | null;
-    avatarPreset: AvatarPresetKey | null;
-  };
-  isAdmin: boolean;
-  current: boolean;
-}
-
-export function getSessions() {
-  return apiFetch<SessionAccount[]>("/auth/sessions");
-}
-
-export function switchAccount(actorId: string) {
-  return apiFetch<Me>("/auth/switch", { method: "POST", body: JSON.stringify({ actorId }) });
-}
-
-export function removeSession(actorId: string) {
-  return apiFetch<void>(`/auth/sessions/${encodeURIComponent(actorId)}`, { method: "DELETE" });
-}
-
 export function verifyEmail(token: string) {
   return apiFetch<void>("/auth/verify-email", { method: "POST", body: JSON.stringify({ token }) });
 }
