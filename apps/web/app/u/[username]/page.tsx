@@ -364,7 +364,7 @@ export default function ProfilePage() {
             </p>
           </div>
           {isOwnProfile && (
-            <div style={{ display: "flex", gap: "0.5rem", paddingTop: "0.6rem" }}>
+            <div className="profile-owner-actions" style={{ display: "flex", gap: "0.5rem", paddingTop: "0.6rem" }}>
               <Link href="/settings" className="btn btn-ghost">
                 Settings
               </Link>

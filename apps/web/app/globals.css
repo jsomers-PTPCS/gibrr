@@ -173,6 +173,12 @@ button {
     padding: 0.25rem 0.45rem;
     font-size: 0.7rem;
   }
+
+  /* Profile page's Settings/Log out row (app/u/[username]/page.tsx). */
+  .profile-owner-actions .btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.7rem;
+  }
 }
 
 /* Buttons */
@@ -835,6 +841,31 @@ select.input:focus {
 .tabs button.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .tabs {
+    gap: 0.1rem;
+    padding: 0 0.5rem;
+    /* Safety net, not the primary fix — the shrunk size below is meant
+       to make every tab fit without this ever kicking in, but a profile
+       with every optional tab enabled (Keeps, BookWyrm) plus this app's
+       longest label ("Relationships") is close enough to the edge that
+       scrolling beats the alternative, which is a tab silently clipped
+       past the edge of a screen that no longer scrolls (html/body's
+       overflow-x: hidden backstop). */
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tabs button {
+    padding: 0.65rem 0.2rem;
+    font-size: 0.6rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
 }
 
 /* Intro sidebar (profile page) */
