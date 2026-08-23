@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -79,6 +80,40 @@ export default function ProfilePage() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [uploadingHeader, setUploadingHeader] = useState(false);
   const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+
+  // Mobile-only "⋮" menu (see .tabs/.tab-menu media queries) — the full
+  // desktop tab strip doesn't fit a phone's width at any legible size
+  // once every optional tab (Keeps, BookWyrm) is in play. Portaled to
+  // document.body (see the render below) rather than positioned
+  // relative to .tab-menu, because the profile header is an
+  // overflow: hidden card (needed for the cover photo's rounded
+  // corners) that would otherwise clip the dropdown — so its position
+  // is computed from the trigger button's rect instead of plain CSS.
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
+  const [tabMenuPos, setTabMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const tabMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const tabMenuDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!tabMenuOpen) return;
+    const rect = tabMenuTriggerRef.current?.getBoundingClientRect();
+    if (rect) setTabMenuPos({ top: rect.bottom + 4, left: rect.left });
+  }, [tabMenuOpen]);
+
+  useEffect(() => {
+    if (!tabMenuOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        !tabMenuTriggerRef.current?.contains(target) &&
+        !tabMenuDropdownRef.current?.contains(target)
+      ) {
+        setTabMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [tabMenuOpen]);
 
   function refreshProfile() {
     return getProfile(username)
@@ -186,6 +221,19 @@ export default function ProfilePage() {
 
   const isOwnProfile = me?.actor.username === profile.actor.username;
   const displayLabel = profile.actor.displayName ?? profile.actor.username;
+
+  // Backs both the desktop .tabs strip and the mobile "⋮" dropdown
+  // (tab-menu below) so the two can't drift out of sync with each other.
+  const tabItems: { key: typeof tab; label: string }[] = [
+    { key: "posts", label: "Gibs" },
+    { key: "comments", label: "Chatter" },
+    { key: "about", label: "About" },
+    { key: "calendar", label: "Calendar" },
+    { key: "relationships", label: "Relationships" },
+    { key: "photos", label: "Photos" },
+    ...(isOwnProfile ? [{ key: "keeps" as const, label: "Keeps" }] : []),
+    ...(profile.actor.bookwyrmHandle ? [{ key: "bookwyrm" as const, label: "BookWyrm" }] : []),
+  ];
   const joined = new Date(profile.actor.createdAt).toLocaleDateString(undefined, {
     month: "long",
     year: "numeric",
@@ -290,6 +338,7 @@ export default function ProfilePage() {
           )}
         </div>
         <div
+          className="profile-header-row"
           style={{
             padding: "0 1.5rem 1rem",
             display: "flex",
@@ -302,9 +351,13 @@ export default function ProfilePage() {
               not on the row) — the row itself starts right at the header's
               bottom edge, so however many lines the name/handle wrap to on
               a narrow screen, they only ever grow downward and can't climb
-              back up over the header. */}
+              back up over the header. On mobile, .profile-avatar-wrap takes
+              the full row width (see globals.css), putting the avatar on
+              its own line so the name and Settings/Log out have the whole
+              width to share on the line below instead of competing with a
+              128px avatar for space. */}
           <div
-            className={isOwnProfile ? "profile-image-editable" : undefined}
+            className={`profile-avatar-wrap${isOwnProfile ? " profile-image-editable" : ""}`}
             style={{
               border: "5px solid var(--surface)",
               borderRadius: "50%",
@@ -350,7 +403,7 @@ export default function ProfilePage() {
               </>
             )}
           </div>
-          <div style={{ flex: 1, paddingTop: "0.6rem", minWidth: 200 }}>
+          <div className="profile-name-block" style={{ flex: 1, paddingTop: "0.6rem" }}>
             <h1 style={{ margin: 0, fontSize: "1.7rem" }}>
               {displayLabel}
               {profile.actor.pronouns && (
@@ -400,48 +453,62 @@ export default function ProfilePage() {
 
         {me && !isOwnProfile && <ProfileMemoBox username={username} initialMemo={profile.memo} />}
 
-        <nav className="tabs">
-          <button className={tab === "posts" ? "active" : undefined} onClick={() => setTab("posts")}>
-            Gibs
-          </button>
-          <button
-            className={tab === "comments" ? "active" : undefined}
-            onClick={() => setTab("comments")}
-          >
-            Chatter
-          </button>
-          <button className={tab === "about" ? "active" : undefined} onClick={() => setTab("about")}>
-            About
-          </button>
-          <button
-            className={tab === "calendar" ? "active" : undefined}
-            onClick={() => setTab("calendar")}
-          >
-            Calendar
-          </button>
-          <button
-            className={tab === "relationships" ? "active" : undefined}
-            onClick={() => setTab("relationships")}
-          >
-            Relationships
-          </button>
-          <button className={tab === "photos" ? "active" : undefined} onClick={() => setTab("photos")}>
-            Photos
-          </button>
-          {isOwnProfile && (
-            <button className={tab === "keeps" ? "active" : undefined} onClick={() => setTab("keeps")}>
-              Keeps
-            </button>
-          )}
-          {profile.actor.bookwyrmHandle && (
+        {/* Desktop tab strip — hidden on mobile in favor of the "⋮" menu
+            below (see .tabs/.tab-menu media queries), the same fit
+            problem the Circles page tabs had, but worse: up to 8 tabs
+            including "Relationships" as a label doesn't fit a phone's
+            width at any legible size. */}
+        <nav className="tabs profile-tabs">
+          {tabItems.map((item) => (
             <button
-              className={tab === "bookwyrm" ? "active" : undefined}
-              onClick={() => setTab("bookwyrm")}
+              key={item.key}
+              className={item.key === tab ? "active" : undefined}
+              onClick={() => setTab(item.key)}
             >
-              BookWyrm
+              {item.label}
             </button>
-          )}
+          ))}
         </nav>
+
+        {/* Mobile-only equivalent — a compact trigger naming the current
+            tab plus a "⋮" button that opens the same list as a dropdown. */}
+        <div className="tab-menu">
+          <button
+            ref={tabMenuTriggerRef}
+            type="button"
+            className="btn btn-ghost tab-menu-trigger"
+            onClick={() => setTabMenuOpen((open) => !open)}
+            aria-haspopup="true"
+            aria-expanded={tabMenuOpen}
+          >
+            {tabItems.find((t) => t.key === tab)?.label}
+            <span aria-hidden>⋮</span>
+          </button>
+          {tabMenuOpen &&
+            tabMenuPos &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                ref={tabMenuDropdownRef}
+                className="card tab-menu-dropdown"
+                style={{ position: "fixed", top: tabMenuPos.top, left: tabMenuPos.left }}
+              >
+                {tabItems.map((item) => (
+                  <button
+                    key={item.key}
+                    className={item.key === tab ? "active" : undefined}
+                    onClick={() => {
+                      setTab(item.key);
+                      setTabMenuOpen(false);
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>,
+              document.body,
+            )}
+        </div>
       </div>
 
       {/* Two-column body: Intro sidebar + content */}

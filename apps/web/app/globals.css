@@ -146,6 +146,14 @@ button {
   margin-bottom: 1rem;
 }
 
+/* Base (desktop) width for the profile page's name/handle block — kept
+   as a real CSS rule rather than inline so the mobile override below
+   can actually win the cascade (an inline style always beats a
+   stylesheet rule, media query or not). */
+.profile-name-block {
+  min-width: 200px;
+}
+
 /* Less wasted horizontal space around post cards on a phone screen —
    the desktop side padding just eats width that phone screens don't
    have to spare. */
@@ -178,6 +186,34 @@ button {
   .profile-owner-actions .btn {
     padding: 0.25rem 0.5rem;
     font-size: 0.7rem;
+  }
+
+  /* Profile header row: avatar + name-block + Settings/Log out normally
+     share one flex row, but the 128px avatar alone eats most of a
+     phone's width, pushing Settings/Log out onto their own line below
+     the name instead of beside it. Giving the avatar the full row width
+     puts it on its own line, freeing the line below for the name and
+     buttons to actually sit side by side. */
+  .profile-header-row {
+    row-gap: 0.5rem;
+  }
+  .profile-avatar-wrap {
+    flex-basis: 100%;
+  }
+  .profile-name-block {
+    min-width: 0;
+  }
+  .profile-name-block h1 {
+    font-size: 1.35rem;
+  }
+  /* Stacked instead of side-by-side — at the default row layout the two
+     buttons together need as much width as "claudetest" does, which
+     forced the name to wrap mid-word. Stacked, they only need the
+     wider button's width instead of both buttons' combined width. */
+  .profile-owner-actions {
+    flex-direction: column;
+    align-items: stretch;
+    flex-shrink: 0;
   }
 }
 
@@ -847,13 +883,11 @@ select.input:focus {
   .tabs {
     gap: 0.1rem;
     padding: 0 0.5rem;
-    /* Safety net, not the primary fix — the shrunk size below is meant
-       to make every tab fit without this ever kicking in, but a profile
-       with every optional tab enabled (Keeps, BookWyrm) plus this app's
-       longest label ("Relationships") is close enough to the edge that
-       scrolling beats the alternative, which is a tab silently clipped
-       past the edge of a screen that no longer scrolls (html/body's
-       overflow-x: hidden backstop). */
+    /* Safety net for Settings/Group pages, which still use the shrunk
+       strip below rather than a "⋮" menu — a long tab list scrolls
+       within its own bounds instead of silently clipping past the edge
+       of a screen that no longer scrolls (html/body's overflow-x:
+       hidden backstop). */
     overflow-x: auto;
     scrollbar-width: none;
   }
@@ -865,6 +899,61 @@ select.input:focus {
     font-size: 0.6rem;
     white-space: nowrap;
     flex-shrink: 0;
+  }
+
+  /* Profile page only (app/u/[username]/page.tsx) — replaced by the
+     .tab-menu "⋮" dropdown below instead of the shrunk-and-scrolling
+     treatment the rest of .tabs gets, since a profile with every
+     optional tab plus "Relationships" as a label doesn't fit at any
+     legible size even shrunk. */
+  .profile-tabs {
+    display: none;
+  }
+}
+
+.tab-menu {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .tab-menu {
+    display: block;
+    position: relative;
+    padding: 0 1rem 0.75rem;
+  }
+  .tab-menu-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  /* position/top/left are set inline (page.tsx) from the trigger
+     button's measured rect — the dropdown is portaled to document.body,
+     so plain "position: absolute relative to .tab-menu" would land in
+     the wrong place (or get clipped: the profile header is an
+     overflow: hidden card). */
+  .tab-menu-dropdown {
+    z-index: 20;
+    min-width: 190px;
+    padding: 0.4rem;
+    display: flex;
+    flex-direction: column;
+  }
+  .tab-menu-dropdown button {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-weight: 600;
+    text-align: left;
+    padding: 0.55rem 0.6rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .tab-menu-dropdown button:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+  .tab-menu-dropdown button.active {
+    color: var(--accent);
   }
 }
 
