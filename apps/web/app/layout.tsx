@@ -9,6 +9,14 @@ import { PwaRegister } from "../components/PwaRegister";
 import { THEME_INIT_SCRIPT } from "../lib/theme";
 import "./globals.css";
 
+// Every page under this layout has per-session state (login, unread
+// counts) even though most of it loads client-side — Next's default
+// static-optimization otherwise marks pages as long-lived-cacheable
+// (s-maxage=31536000), which meant a client's HTTP cache (a phone's
+// Chrome, in the Android app's case) could keep serving an old build's
+// HTML/nav indefinitely after a deploy instead of revalidating.
+export const dynamic = "force-dynamic";
+
 const orbitron = Orbitron({
   subsets: ["latin"],
   weight: ["700", "900"],
