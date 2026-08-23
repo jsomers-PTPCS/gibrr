@@ -15,7 +15,7 @@ import {
 import { Avatar } from "./Avatar";
 import { MessageIcon } from "./MessageIcon";
 import { timeAgo } from "../lib/timeAgo";
-import { onOpenChatDock, onOpenChatDockList } from "../lib/chatDock";
+import { onOpenChatDock, onToggleChatDockList } from "../lib/chatDock";
 
 const LIST_POLL_MS = 10000;
 const THREAD_POLL_MS = 3000;
@@ -81,10 +81,13 @@ export function ChatDock() {
     });
   }, []);
 
-  // Nav.tsx's bottom tab bar Messenger icon (mobile) — no specific
-  // conversation, just open the list the way the corner launcher does.
+  // BottomTabBar.tsx's Messenger icon (mobile) — opens the list on the
+  // first tap, closes the whole dock (from list or an open thread) on a
+  // second tap, same as tapping a nav tab you're already on.
   useEffect(() => {
-    return onOpenChatDockList(() => setView("list"));
+    return onToggleChatDockList(() => {
+      setView((v) => (v === "collapsed" ? "list" : "collapsed"));
+    });
   }, []);
 
   async function handleSend(e: FormEvent) {

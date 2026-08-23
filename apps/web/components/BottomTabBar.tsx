@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getMe, getConversations, type Me } from "../lib/api";
-import { openChatDockList } from "../lib/chatDock";
+import { toggleChatDockList } from "../lib/chatDock";
 import { HomeIcon, CirclesIcon, LoopsIcon } from "./icons";
 import { MessageIcon } from "./MessageIcon";
 
@@ -41,7 +41,7 @@ export function BottomTabBar() {
 
   function handleMessenger() {
     if (me) {
-      openChatDockList();
+      toggleChatDockList();
     } else {
       router.push("/login");
     }
