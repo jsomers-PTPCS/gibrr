@@ -93,6 +93,7 @@ export interface Post {
   savedToCalendar: boolean;
   imageUrl: string | null;
   videoUrl: string | null;
+  audioUrl: string | null;
   location: string | null;
   // Has the viewer boosted this post (ActivityPub Announce).
   boosted: boolean;
@@ -120,6 +121,17 @@ export interface Post {
   // Private, never federated — a plain "save for later" (Misskey/Mastodon
   // call this a bookmark), see routes/posts.ts's /posts/:id/bookmark.
   bookmarked: boolean;
+  // The real ActivityPub object IRI — set only for federated content
+  // (arrived via inbox, resolved from a pasted URL, or Explore-cached),
+  // null for anything authored locally. Rides along on every Post
+  // response; used here just to decide whether to show the section below.
+  remoteId: string | null;
+  // The origin server's own real like/share counts, fetched live — only
+  // present on the GET /posts/:id response (routes/posts.ts), never on a
+  // feed/list entry (too expensive per-item there). Null fields mean the
+  // origin didn't report that number; the whole value is null for a local
+  // post or when the live fetch fails.
+  remoteEngagement?: { likes: number | null; shares: number | null } | null;
 }
 
 export interface PollOptionResult {
@@ -163,6 +175,7 @@ export interface Profile {
     pronouns: string | null;
     location: string | null;
     website: string | null;
+    bookwyrmHandle: string | null;
     customCss: string | null;
     customHtml: string | null;
     backgroundColor: string | null;
@@ -677,12 +690,25 @@ export function deleteProfileMemo(username: string) {
   return apiFetch<void>(`/profile/${encodeURIComponent(username)}/memo`, { method: "DELETE" });
 }
 
+export interface BookwyrmActivityItem {
+  id: string;
+  contentHtml: string;
+  bookTitle: string | null;
+  bookCoverUrl: string;
+  publishedAt: string;
+}
+
+export function getBookwyrmActivity(username: string) {
+  return apiFetch<{ items: BookwyrmActivityItem[] }>(`/profile/${encodeURIComponent(username)}/bookwyrm`);
+}
+
 export function updateProfile(input: {
   displayName?: string;
   summary?: string;
   pronouns?: string;
   location?: string;
   website?: string;
+  bookwyrmHandle?: string;
   customCss?: string;
   customHtml?: string;
   backgroundColor?: string;
@@ -887,7 +913,9 @@ export function removeFriendship(username: string) {
 }
 
 export function getFriends(username: string) {
-  return apiFetch<(ActorSummary & { id: string })[]>(`/friends/${encodeURIComponent(username)}`);
+  return apiFetch<(ActorSummary & { id: string; bookwyrmHandle: string | null })[]>(
+    `/friends/${encodeURIComponent(username)}`,
+  );
 }
 
 export function getFriendStatus(username: string) {
@@ -896,6 +924,10 @@ export function getFriendStatus(username: string) {
 
 export function getFriendRequests() {
   return apiFetch<(ActorSummary & { id: string })[]>("/friends/requests");
+}
+
+export function getSentFriendRequests() {
+  return apiFetch<(ActorSummary & { id: string })[]>("/friends/requests/sent");
 }
 
 // Fediverse follow graph — separate from Friendship (mutual, local-feel)
@@ -928,6 +960,13 @@ export interface FollowPreview {
   displayName: string | null;
   avatarImageUrl: string | null;
   avatarPreset: AvatarPresetKey | null;
+  // Null for a local actor (use /u/{username} instead) — set for a
+  // remote one to their real AP object IRI, which real fediverse
+  // software also answers as an HTML profile page for a plain browser
+  // request (no Accept: activity+json), same as Post.remoteId already
+  // doubles as a "view original" link. The only way to actually browse
+  // a remote person's posts, since there's no in-app profile page for one.
+  url: string | null;
 }
 
 export function getFollowPreview(handle: string) {
@@ -1038,6 +1077,10 @@ export function removeFamilyLink(linkId: string) {
 
 export function getFamilyRequests() {
   return apiFetch<FamilyLinkRequest[]>("/family/requests");
+}
+
+export function getSentFamilyRequests() {
+  return apiFetch<FamilyLinkRequest[]>("/family/requests/sent");
 }
 
 export function getFamilyLinks(username: string) {
@@ -1214,6 +1257,29 @@ export function fileReport(input: { targetType: "post" | "comment" | "actor"; ta
   return apiFetch<{ reported: true }>("/reports", { method: "POST", body: JSON.stringify(input) });
 }
 
+// GET /admin/server-health — the Host dashboard's at-a-glance operational
+// panel (routes/admin.ts). Every numeric field can be null on its own if
+// that one sub-check failed (e.g. `du`/`df` unavailable) without taking
+// down the rest of the panel.
+export interface ServerHealth {
+  active: boolean;
+  uptimeSeconds: number;
+  // Null only if the heartbeat row genuinely doesn't exist yet (a request
+  // that races the very first startup write) — in practice always set.
+  // A gap since the last heartbeat past heartbeat.ts's own threshold is
+  // what advances this; a routine deploy restart does not, unlike
+  // uptimeSeconds (which resets on every restart, planned or not).
+  lastDowntimeAt: string | null;
+  database: { connected: boolean; sizeBytes: number | null };
+  uploads: { sizeBytes: number | null };
+  usedByInstanceBytes: number | null;
+  disk: { totalBytes: number; usedBytes: number; availableBytes: number } | null;
+}
+
+export function getServerHealth() {
+  return apiFetch<ServerHealth>("/admin/server-health");
+}
+
 export interface AdminReport {
   id: string;
   reason: string;
@@ -1310,6 +1376,11 @@ export interface ExploreServer {
   domain: string;
   name: string | null;
   createdAt: string;
+  // True once Connect via OAuth has completed for this server — for
+  // servers whose public timeline needed a logged-in user, not just a
+  // publicly reachable one. Never the token itself, see
+  // routes/admin.ts's EXPLORE_SERVER_SELECT.
+  connected: boolean;
 }
 
 export function getAdminExploreServers() {
@@ -1325,6 +1396,18 @@ export function addAdminExploreServer(domain: string, name?: string) {
 
 export function removeAdminExploreServer(domain: string) {
   return apiFetch<void>(`/admin/explore-servers/${encodeURIComponent(domain)}`, { method: "DELETE" });
+}
+
+// Starts the OAuth2 Authorization Code flow against a server whose
+// public timeline requires a logged-in user (e.g. Pixelfed 0.12+).
+// Navigate the browser to the returned authorizeUrl (a full-page
+// redirect, not a fetch) so the admin can log into that server and
+// authorize Gibrr; it redirects back to /admin once done.
+export function startExploreServerOAuth(domain: string, name?: string) {
+  return apiFetch<{ authorizeUrl: string }>(`/admin/explore-servers/${encodeURIComponent(domain)}/oauth/start`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
 }
 
 export function getExploreServers() {
@@ -1359,6 +1442,15 @@ export interface ExploreStatus {
 
 export function getExploreTimeline(domain: string) {
   return apiFetch<ExploreStatus[]>(`/explore/${encodeURIComponent(domain)}/timeline`);
+}
+
+// A live, aggregated video feed across every Host-curated server
+// detected as Loops software — app/loops/page.tsx's TikTok-style
+// scrollable view. Each item is a real, already-resolved Post (full
+// vote/boost/bookmark state included), not a raw preview like
+// getExploreTimeline.
+export function getLoopsFeed() {
+  return apiFetch<{ posts: Post[] }>("/explore/loops/feed");
 }
 
 // Fediverse discovery links — routes/directoryLinks.ts. Public read

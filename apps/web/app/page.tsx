@@ -8,6 +8,8 @@ import { Avatar } from "../components/Avatar";
 
 export default function HomePage() {
   const [posts, setPosts] = useState<Post[] | "loading" | "error">("loading");
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -22,8 +24,23 @@ export default function HomePage() {
   function refreshFeed() {
     setPosts("loading");
     return getFeed()
-      .then((res) => setPosts(res.posts))
+      .then((res) => {
+        setPosts(res.posts);
+        setNextCursor(res.nextCursor);
+      })
       .catch(() => setPosts("error"));
+  }
+
+  async function handleLoadMore() {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const res = await getFeed(nextCursor);
+      setPosts((prev) => (Array.isArray(prev) ? [...prev, ...res.posts] : prev));
+      setNextCursor(res.nextCursor);
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   return (
@@ -110,6 +127,17 @@ export default function HomePage() {
             <PostItem key={post.id} post={post} />
           ))}
         </ul>
+      )}
+
+      {Array.isArray(posts) && nextCursor && (
+        <button
+          className="btn btn-ghost"
+          onClick={handleLoadMore}
+          disabled={loadingMore}
+          style={{ display: "block", margin: "1rem auto" }}
+        >
+          {loadingMore ? "Loading…" : "See more"}
+        </button>
       )}
     </main>
   );

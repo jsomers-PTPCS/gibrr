@@ -1,5 +1,5 @@
 {
-  "name": "@astrion/api",
+  "name": "@gibrr/api",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "start": "node dist/index.js",
     "seed": "tsx src/scripts/seedActor.ts",
     "create-admin": "tsx src/scripts/createAdmin.ts",
+    "normalize-actor-summaries": "tsx src/scripts/normalizeActorSummaries.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },

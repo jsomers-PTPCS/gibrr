@@ -2,19 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
-import {
-  getAntennas,
-  createAntenna,
-  deleteAntenna,
-  ApiError,
-  type Antenna,
-} from "../../lib/api";
-import { useConfirm } from "../../components/ConfirmDialog";
+import { getAntennas, createAntenna, deleteAntenna, ApiError, type Antenna } from "../lib/api";
+import { useConfirm } from "./ConfirmDialog";
 
 // Misskey-style "antennas": saved keyword/author filters, each its own
-// live view of already-visible posts (see [id]/page.tsx). Never
-// federated — a private lens, same as bookmarks.
-export default function AntennasPage() {
+// live view of already-visible posts (see app/antennas/[id]/page.tsx,
+// which stays a standalone route for viewing one watch's matches — only
+// this list+create half moved here, formerly its own app/antennas/page.tsx).
+// Never federated — a private lens, same as Keeps/KeepsTab.
+export function AntennasTab() {
   const confirm = useConfirm();
   const [antennas, setAntennas] = useState<Antenna[] | "loading" | "error">("loading");
   const [name, setName] = useState("");
@@ -76,8 +72,7 @@ export default function AntennasPage() {
   }
 
   return (
-    <main className="page">
-      <h1>Watching</h1>
+    <div>
       <p className="text-dim" style={{ marginTop: 0 }}>
         Saved keyword/author filters — each one is its own live view of posts you can already
         see, matching whatever you set below.
@@ -140,6 +135,6 @@ export default function AntennasPage() {
           ))}
         </ul>
       )}
-    </main>
+    </div>
   );
 }

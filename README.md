@@ -36,16 +36,16 @@ pnpm install
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.local.example apps/web/.env.local
 
-pnpm --filter @astrion/api prisma:generate
-pnpm --filter @astrion/api prisma:migrate --name init
-pnpm --filter @astrion/api seed         # creates a local actor: testuser
+pnpm --filter @gibrr/api prisma:generate
+pnpm --filter @gibrr/api prisma:migrate --name init
+pnpm --filter @gibrr/api seed         # creates a local actor: testuser
 ```
 
 ## Run
 
 ```bash
-pnpm --filter @astrion/api dev          # API on http://localhost:4000
-pnpm --filter @astrion/web dev          # Web on http://localhost:3000
+pnpm --filter @gibrr/api dev          # API on http://localhost:4000
+pnpm --filter @gibrr/web dev          # Web on http://localhost:3000
 ```
 
 Or run both at once from the root: `pnpm dev`.

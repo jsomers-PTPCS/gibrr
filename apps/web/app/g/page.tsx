@@ -13,6 +13,8 @@ import {
   joinRemoteGroup,
   getCommunityMemberships,
   getExploreServers,
+  subscribeToExploreServer,
+  unsubscribeFromExploreServer,
   getMe,
   ApiError,
   type Community,
@@ -27,6 +29,7 @@ import {
   type GroupPrivacy,
 } from "../../lib/groupRoles";
 import { RenderedDescription } from "../../components/RenderedDescription";
+import { AntennasTab } from "../../components/AntennasTab";
 
 // Same constraint as /search's remote lookup: no crawled index of the
 // fediverse exists to fuzzy-search against (no server has one) — a
@@ -45,11 +48,12 @@ function descriptionTeaser(html: string): string {
 export default function GroupsPage() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
-  const [tab, setTab] = useState<"discover" | "mine" | "explore">("discover");
+  const [tab, setTab] = useState<"discover" | "mine" | "explore" | "watching">("mine");
 
   const [exploreServers, setExploreServers] = useState<
     (ExploreServer & { subscribed: boolean })[] | "loading" | "error"
   >("loading");
+  const [subscribingDomain, setSubscribingDomain] = useState<string | null>(null);
 
   // Discover: browse-all when query is empty, GET /search's group results
   // otherwise — one state, one effect, so there's never a stale mix of
@@ -178,6 +182,33 @@ export default function GroupsPage() {
     }
   }
 
+  // Same toggle the per-server Explore page's own Subscribe button does
+  // (app/explore/[domain]/page.tsx) — added here too so subscribing
+  // doesn't require opening a server just to find that button.
+  async function handleToggleSubscribe(server: ExploreServer & { subscribed: boolean }) {
+    if (!me) {
+      window.location.href = "/login";
+      return;
+    }
+    setSubscribingDomain(server.domain);
+    try {
+      if (server.subscribed) {
+        await unsubscribeFromExploreServer(server.domain);
+      } else {
+        await subscribeToExploreServer(server.domain);
+      }
+      setExploreServers((prev) =>
+        Array.isArray(prev)
+          ? prev.map((s) => (s.domain === server.domain ? { ...s, subscribed: !s.subscribed } : s))
+          : prev,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) window.location.href = "/login";
+    } finally {
+      setSubscribingDomain(null);
+    }
+  }
+
   async function handleJoinRemoteGroup() {
     setRemoteJoinState("joining");
     try {
@@ -270,6 +301,12 @@ export default function GroupsPage() {
           onClick={() => setTab("explore")}
         >
           Explore
+        </button>
+        <button
+          className={`btn ${tab === "watching" ? "btn-primary" : "btn-ghost"}`}
+          onClick={() => setTab("watching")}
+        >
+          Watching
         </button>
       </div>
 
@@ -459,6 +496,7 @@ export default function GroupsPage() {
             React, or Chatter on it like any other Gib. Subscribing merges a server's trending
             posts into your own Home feed going forward.
           </p>
+
           {exploreServers === "loading" && <p className="text-dim">Loading…</p>}
           {exploreServers === "error" && <p className="error-text">Could not load the server list.</p>}
           {Array.isArray(exploreServers) && exploreServers.length === 0 && (
@@ -482,13 +520,30 @@ export default function GroupsPage() {
                       </p>
                     )}
                   </div>
-                  {server.subscribed && <span className="pill">✓ Subscribed</span>}
+                  <button
+                    className={`btn ${server.subscribed ? "btn-ghost" : "btn-primary"}`}
+                    disabled={subscribingDomain === server.domain}
+                    onClick={() => handleToggleSubscribe(server)}
+                  >
+                    {subscribingDomain === server.domain
+                      ? "…"
+                      : server.subscribed
+                        ? "✓ Subscribed"
+                        : "Subscribe"}
+                  </button>
                 </li>
               ))}
             </ul>
           )}
         </>
       )}
+
+      {tab === "watching" && !me && (
+        <p className="text-dim">
+          <a href="/login">Log in</a> to set up saved keyword/author watches.
+        </p>
+      )}
+      {tab === "watching" && me && <AntennasTab />}
     </main>
   );
 }

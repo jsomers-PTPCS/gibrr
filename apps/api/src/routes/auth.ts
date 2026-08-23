@@ -42,7 +42,7 @@ const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const TWO_FACTOR_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
-function webOrigin(): string {
+export function webOrigin(): string {
   return process.env.WEB_ORIGIN ?? "http://localhost:3000";
 }
 

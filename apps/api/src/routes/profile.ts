@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { toPublicActor } from "../federation/localActor.js";
 import { sanitizeProfileHtml } from "../federation/sanitizeProfileHtml.js";
+import { toDescriptionHtml } from "../federation/descriptionHtml.js";
 import { updateActorActivity } from "../federation/activities.js";
 import { deliverToFollowers } from "../federation/deliver.js";
 import { fontPresetKeySchema } from "../federation/fontPresets.js";
@@ -13,7 +14,9 @@ import {
 } from "../federation/imagePresetKeys.js";
 import { aboutVisibilitySchema, redactAboutFields } from "../federation/aboutFields.js";
 import { relationshipStatusSchema } from "../federation/relationshipStatus.js";
+import { fetchBookwyrmActivity } from "../federation/bookwyrmActivity.js";
 import { requireAuth, optionalAuth } from "../auth/session.js";
+import { areFriends } from "./friends.js";
 import { postInclude, FEED_PAGE_SIZE, withCommentCount, postVisibilityWhere } from "./posts.js";
 import {
   attachPostVotes,
@@ -122,6 +125,31 @@ profileRouter.delete("/profile/:username/memo", requireAuth, async (req, res) =>
   res.status(204).end();
 });
 
+// GET /profile/:username/bookwyrm -> that actor's recent BookWyrm
+// reading activity, live-read (not cached — same "read straight
+// through" model as Explore's own live timeline view, since this is a
+// specific known person's feed, not a trending list worth pre-warming
+// via a sweep). Gated to the owner and their accepted friends only —
+// unlike website/other profile fields, this one has real content
+// behind it, not just a link, and the feature was asked for
+// specifically as a friends-list thing rather than public like the
+// rest of the profile.
+profileRouter.get("/profile/:username/bookwyrm", optionalAuth, async (req, res) => {
+  const actor = await prisma.actor.findFirst({ where: { username: req.params.username } });
+  if (!actor) return res.status(404).json({ error: "not found" });
+  if (!actor.bookwyrmHandle) return res.status(404).json({ error: "no BookWyrm account linked" });
+
+  const isOwner = req.actor?.id === actor.id;
+  if (!isOwner && !(req.actor && (await areFriends(req.actor.id, actor.id)))) {
+    return res.status(403).json({ error: "only friends can see this" });
+  }
+
+  const items = await fetchBookwyrmActivity(actor.bookwyrmHandle);
+  if (items === null) return res.status(502).json({ error: "could not reach that BookWyrm account" });
+
+  res.json({ items });
+});
+
 const updateProfileSchema = z.object({
   displayName: z.string().min(1).max(120).optional(),
   summary: z.string().max(2000).optional(),
@@ -131,6 +159,15 @@ const updateProfileSchema = z.object({
   // "example.com" without a scheme, and rejecting that is more annoying
   // than useful. The frontend prepends https:// when rendering as a link.
   website: z.string().max(300).optional(),
+  // "user@domain", same loose-validation philosophy as website above —
+  // real resolution (webfinger) happens live at fetch time
+  // (federation/bookwyrmActivity.ts), not here, so a typo just means
+  // "couldn't reach that account" later rather than a rejected save now.
+  bookwyrmHandle: z
+    .string()
+    .max(200)
+    .transform((v) => v.trim().replace(/^@/, ""))
+    .optional(),
   // MySpace-style customization, rendered client-side inside a
   // sandbox="" iframe (see CustomProfileFrame.tsx) — sanitizing customHtml
   // here is defense in depth, not the primary control. customCss is
@@ -188,7 +225,7 @@ profileRouter.patch("/profile", requireAuth, async (req, res) => {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const { customHtml, headerPreset, backgroundPreset, avatarPreset, dateOfBirth, aboutVisibility, ...rest } =
+  const { customHtml, summary, headerPreset, backgroundPreset, avatarPreset, dateOfBirth, aboutVisibility, ...rest } =
     parsed.data;
 
   let mergedVisibility: Record<string, boolean> | undefined;
@@ -208,6 +245,12 @@ profileRouter.patch("/profile", requireAuth, async (req, res) => {
     data: {
       ...rest,
       ...(customHtml !== undefined ? { customHtml: sanitizeProfileHtml(customHtml) } : {}),
+      // A plain textarea (see u/[username]/edit/page.tsx) — real markup
+      // never comes from here, but toDescriptionHtml promotes the plain
+      // text to the same blank-line-paragraph HTML a remote actor's own
+      // summary already arrives as (see remoteActor.ts), so both render
+      // identically through RenderedDescription on the profile page.
+      ...(summary !== undefined ? { summary: toDescriptionHtml(summary) } : {}),
       ...(dateOfBirth !== undefined ? { dateOfBirth: new Date(dateOfBirth) } : {}),
       ...(mergedVisibility !== undefined ? { aboutVisibility: mergedVisibility } : {}),
       // Picking a preset means "use this instead of my uploaded image" —

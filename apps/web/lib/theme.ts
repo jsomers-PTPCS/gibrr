@@ -1,6 +1,6 @@
 export type Theme = "dark" | "light";
 
-const THEME_KEY = "astrion-theme";
+const THEME_KEY = "gibrr-theme";
 
 // Inlined into a pre-hydration <script> in layout.tsx so the right theme
 // attribute is set before first paint — avoids a flash of the wrong theme.

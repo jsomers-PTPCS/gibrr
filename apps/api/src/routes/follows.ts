@@ -161,6 +161,13 @@ followsRouter.get("/follows/preview", requireAuth, async (req, res) => {
       displayName: remote.name ?? null,
       avatarImageUrl: null,
       avatarPreset: null,
+      // The actor's own AP object IRI — real fediverse software answers
+      // this same URL with an HTML profile page via content negotiation
+      // when a browser (no Accept: activity+json) requests it, same as
+      // how Post.remoteId already doubles as a real "view original"
+      // link. This is the *only* way to actually browse this person's
+      // posts — there's no in-app profile page for a remote actor.
+      url: remote.id,
     });
   }
 
@@ -175,19 +182,24 @@ followsRouter.get("/follows/preview", requireAuth, async (req, res) => {
       select: FOLLOW_SUMMARY_SELECT,
     });
     if (!actor) return res.status(404).json({ error: "not found" });
-    return res.json(actor);
+    // A local actor already has a real in-app profile page — no
+    // external link needed, see search/page.tsx's use of this field.
+    return res.json({ ...actor, url: null });
   }
 
   const remote = await discoverActor(parsed.data, req.actor!);
   if (!remote) return res.status(404).json({ error: "not found" });
 
-  const url = new URL(remote.id);
+  const remoteIri = new URL(remote.id);
   res.json({
     id: null,
-    username: remote.preferredUsername ?? url.pathname.split("/").pop() ?? remote.id,
-    domain: url.host,
+    username: remote.preferredUsername ?? remoteIri.pathname.split("/").pop() ?? remote.id,
+    domain: remoteIri.host,
     displayName: remote.name ?? null,
     avatarImageUrl: null,
+    // See the ?url= branch above's own comment — same "AP object IRI
+    // doubles as a real browser-viewable profile page" reasoning.
+    url: remote.id,
     avatarPreset: null,
   });
 });

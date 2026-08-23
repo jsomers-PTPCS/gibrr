@@ -14,7 +14,7 @@ import {
   attachBookmarked,
 } from "../votes.js";
 import { saveProcessedImage, saveValidatedFile } from "../uploads.js";
-import { isLocalActor, actorIri } from "../federation/localActor.js";
+import { isLocalActor, actorIri, getOrCreateInstanceActor } from "../federation/localActor.js";
 import {
   createNoteFromPost,
   createActivity,
@@ -32,6 +32,7 @@ import { deletePosts } from "../deletion.js";
 import { extractHashtagTokens, extractMentionTokens } from "../federation/textEntities.js";
 import { resolveMentions } from "../federation/mentions.js";
 import { resolveAndCacheRemotePost } from "../federation/remotePost.js";
+import { syncRemoteReplies, fetchLiveCounts } from "../federation/remoteEngagement.js";
 
 // Whether the viewer is this post's real local author — computed here
 // (not a votes.ts-style batch helper, no query needed: authorActorId
@@ -799,7 +800,27 @@ postsRouter.get("/posts/:id", optionalAuth, async (req, res) => {
   const [withPoll] = await attachPolls([withReactions], req.actor?.id);
   const [withBookmarked] = await attachBookmarked([withPoll], req.actor?.id);
 
-  res.json({ ...withCommentCount(withBookmarked), boostedBy: null, canEdit: canEditPost(withBookmarked, req.actor?.id) });
+  // For a federated post, pull in its real reply thread (as ordinary
+  // Comment rows, so they render/vote/reply through the existing comment
+  // UI and federation) and its real origin-reported like/share counts —
+  // both fetched live, on this one already-slower single-post path, never
+  // on the feed. See federation/remoteEngagement.ts for the bounded walk.
+  let commentCount = withBookmarked._count.comments;
+  let remoteEngagement: { likes: number | null; shares: number | null } | null = null;
+  if (post.remoteId) {
+    const instanceActor = await getOrCreateInstanceActor();
+    await syncRemoteReplies({ id: post.id, remoteId: post.remoteId }, instanceActor);
+    remoteEngagement = await fetchLiveCounts(post.remoteId, instanceActor);
+    commentCount = await prisma.comment.count({ where: { postId: post.id } });
+  }
+
+  res.json({
+    ...withCommentCount(withBookmarked),
+    commentCount,
+    remoteEngagement,
+    boostedBy: null,
+    canEdit: canEditPost(withBookmarked, req.actor?.id),
+  });
 });
 
 // Same editable-field shape as createPostSchema minus communityId (moving

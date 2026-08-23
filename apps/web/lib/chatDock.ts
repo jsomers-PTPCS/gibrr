@@ -8,7 +8,7 @@ export interface OpenChatDetail {
   otherActor: { username: string; displayName: string | null };
 }
 
-const OPEN_EVENT = "astrion:open-chat";
+const OPEN_EVENT = "gibrr:open-chat";
 
 export function openChatDock(detail: OpenChatDetail) {
   window.dispatchEvent(new CustomEvent<OpenChatDetail>(OPEN_EVENT, { detail }));

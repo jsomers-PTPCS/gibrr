@@ -59,6 +59,15 @@ function SearchResultsInner() {
       .catch(() => setDirectoryLinks([]));
   }, []);
 
+  // A handle typed the way every fediverse client actually displays one
+  // (@alice@example.social) still needs to resolve — strip a leading
+  // "@" before it ever reaches HANDLE_PATTERN or a lookup call, so
+  // "alice@example.social" and "@alice@example.social" behave
+  // identically. Left out of q itself (used as-is for the plain-text
+  // search box below) since a leading "@" there is fine either way —
+  // this only matters for the exact-handle lookup paths.
+  const handleQuery = q.trim().replace(/^@/, "");
+
   useEffect(() => {
     if (!q) {
       setResults({ posts: [], actors: [], groups: [] });
@@ -72,7 +81,7 @@ function SearchResultsInner() {
     setJoinState("idle");
     setFollowState("idle");
     setPostLookupState("idle");
-    if (HANDLE_PATTERN.test(q.trim())) {
+    if (HANDLE_PATTERN.test(handleQuery)) {
       // Both fire together: a handle is either a Group or a Person, never
       // both, so exactly one of these ever resolves to something — the
       // other silently 404s and stays null. This is cold, exact-handle
@@ -80,11 +89,11 @@ function SearchResultsInner() {
       // fuzzy suggestions index — no server has one of those for the
       // whole fediverse.
       setRemoteGroup("loading");
-      lookupRemoteGroup(q.trim())
+      lookupRemoteGroup(handleQuery)
         .then(setRemoteGroup)
         .catch(() => setRemoteGroup(null));
       setPersonPreview("loading");
-      getFollowPreview(q.trim())
+      getFollowPreview(handleQuery)
         .then(setPersonPreview)
         .catch(() => setPersonPreview(null));
     } else if (URL_PATTERN.test(q.trim())) {
@@ -127,7 +136,7 @@ function SearchResultsInner() {
   async function handleJoinRemoteGroup() {
     setJoinState("joining");
     try {
-      await joinRemoteGroup(q.trim());
+      await joinRemoteGroup(handleQuery);
       setJoinState("requested");
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -144,7 +153,7 @@ function SearchResultsInner() {
       if (URL_PATTERN.test(q.trim())) {
         await followUrl(q.trim());
       } else {
-        await followHandle(q.trim());
+        await followHandle(handleQuery);
       }
       setFollowState("sent");
     } catch (err) {
@@ -251,13 +260,35 @@ function SearchResultsInner() {
         <p className="text-faint">Looking up {q} on the fediverse…</p>
       ) : personPreview ? (
         <div className="card" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <Avatar name={personPreview.displayName ?? personPreview.username} size={40} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <strong>{personPreview.displayName ?? personPreview.username}</strong>
-            <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
-              @{personPreview.username}@{personPreview.domain}
-            </p>
-          </div>
+          {personPreview.url ? (
+            <a
+              href={personPreview.url}
+              target="_blank"
+              rel="noreferrer"
+              style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: 0, color: "inherit" }}
+            >
+              <Avatar name={personPreview.displayName ?? personPreview.username} size={40} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <strong>{personPreview.displayName ?? personPreview.username}</strong>
+                <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
+                  @{personPreview.username}@{personPreview.domain} ↗
+                </p>
+              </div>
+            </a>
+          ) : (
+            <Link
+              href={`/u/${personPreview.username}`}
+              style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: 0, color: "inherit" }}
+            >
+              <Avatar name={personPreview.displayName ?? personPreview.username} size={40} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <strong>{personPreview.displayName ?? personPreview.username}</strong>
+                <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
+                  @{personPreview.username}@{personPreview.domain}
+                </p>
+              </div>
+            </Link>
+          )}
           {followState === "sent" ? (
             <span className="text-faint">Request sent</span>
           ) : (
@@ -303,7 +334,7 @@ function SearchResultsInner() {
           {results.actors.length === 0 ? (
             <>
               <p className="text-dim">No people found.</p>
-              {!HANDLE_PATTERN.test(q.trim()) && !URL_PATTERN.test(q.trim()) && (
+              {!HANDLE_PATTERN.test(handleQuery) && !URL_PATTERN.test(q.trim()) && (
                 <p className="text-faint" style={{ marginTop: "-0.5rem", marginBottom: "1.5rem" }}>
                   This only searches people this room already knows about — not the whole
                   fediverse (no server can crawl that). If you know their handle, try typing

@@ -68,9 +68,23 @@ async function lookupInstanceSoftware(domain: string): Promise<string | null> {
   // Prefer the highest schema version offered (2.1 over 2.0) — content is
   // the same `software.name` field either way, this just avoids settling
   // for whichever happens to sort first.
-  const href = links
-    ?.filter((l) => typeof l.rel === "string" && l.rel.includes("nodeinfo.diaspora.software") && l.href)
-    .sort((a, b) => (b.rel! > a.rel! ? 1 : -1))[0]?.href;
+  const standardMatches = links?.filter(
+    (l) => typeof l.rel === "string" && l.rel.includes("nodeinfo.diaspora.software") && l.href,
+  );
+  const href =
+    standardMatches && standardMatches.length > 0
+      ? standardMatches.sort((a, b) => (b.rel! > a.rel! ? 1 : -1))[0]?.href
+      : // Confirmed live: at least one real Funkwhale instance links its
+        // nodeinfo document under a non-standard rel (its own docs URL,
+        // not the nodeinfo.diaspora.software schema URI every other
+        // platform here uses) — the whole point of this well-known
+        // document is to list nodeinfo links, so a single unmatched
+        // link is still overwhelmingly likely to be it. Worst case a
+        // bad guess here just 404s/fails the JSON parse below, same
+        // graceful null as any other lookup failure.
+        links?.length === 1
+        ? links[0]?.href
+        : undefined;
   if (!href) return null;
 
   const doc = await fetchJson(href);

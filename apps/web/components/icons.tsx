@@ -29,6 +29,31 @@ function Icon({ children, ...props }: SVGProps<SVGSVGElement>) {
   );
 }
 
+// Loops' (app/loops/page.tsx) own "heart-tap" like — the rest of the
+// app's post score uses VoteButtons' up/down arrows instead, but a
+// TikTok-style feed's single heart-tap convention doesn't have an
+// existing icon of its own yet. Same filled-for-on-state convention as
+// BookmarkIcon.
+export function HeartIcon({ filled = false, ...props }: SVGProps<SVGSVGElement> & { filled?: boolean }) {
+  return (
+    <Icon {...props} fill={filled ? "currentColor" : "none"}>
+      <path d="M12 21s-6.7-4.2-9.3-8.3C.9 9.6 2 5.9 5.5 5.1c2-.5 3.9.4 5 2 .1.1.3.1.4 0 1.1-1.6 3-2.5 5-2 3.5.8 4.6 4.5 2.8 7.6C18.7 16.8 12 21 12 21Z" />
+    </Icon>
+  );
+}
+
+// A rounded-square "reels" play glyph — Nav.tsx's icon-only link to
+// /loops, distinct from BoostIcon's repeat-arrows (already "Echo" on
+// every post) so the two don't read as the same action.
+export function LoopsIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+      <path d="M10 8.5v7l6-3.5-6-3.5Z" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
 export function BoostIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>

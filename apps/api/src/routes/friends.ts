@@ -4,7 +4,30 @@ import { requireAuth, optionalAuth } from "../auth/session.js";
 
 export const friendsRouter = Router();
 
-const ACTOR_SUMMARY_SELECT = { id: true, username: true, domain: true, displayName: true } as const;
+const ACTOR_SUMMARY_SELECT = {
+  id: true,
+  username: true,
+  domain: true,
+  displayName: true,
+  bookwyrmHandle: true,
+} as const;
+
+// Shared with routes/profile.ts's GET /profile/:username/bookwyrm —
+// same "accepted Friendship in either direction" check GET
+// /friends/status/:username already does inline, factored out since a
+// second, unrelated feature now needs the same yes/no answer.
+export async function areFriends(actorIdA: string, actorIdB: string): Promise<boolean> {
+  const friendship = await prisma.friendship.findFirst({
+    where: {
+      state: "accepted",
+      OR: [
+        { requesterId: actorIdA, addresseeId: actorIdB },
+        { requesterId: actorIdB, addresseeId: actorIdA },
+      ],
+    },
+  });
+  return friendship !== null;
+}
 
 // POST /friends/request/:username -> starts a pending Friendship. 409 if a
 // Friendship already exists in either direction (covers both "already
@@ -106,6 +129,20 @@ friendsRouter.get("/friends/requests", requireAuth, async (req, res) => {
     orderBy: { createdAt: "desc" },
   });
   res.json(requests.map((r) => r.requester));
+});
+
+// GET /friends/requests/sent -> caller's own pending outgoing requests —
+// the other half of the picture GET /friends/requests only shows the
+// incoming side of. Lets the Relationships tab show "Sent" alongside
+// "Requests" so a sent request doesn't just disappear from view until
+// the other person acts on it.
+friendsRouter.get("/friends/requests/sent", requireAuth, async (req, res) => {
+  const requests = await prisma.friendship.findMany({
+    where: { requesterId: req.actor!.id, state: "pending" },
+    include: { addressee: { select: ACTOR_SUMMARY_SELECT } },
+    orderBy: { createdAt: "desc" },
+  });
+  res.json(requests.map((r) => r.addressee));
 });
 
 // GET /friends/:username -> that actor's accepted friends, gated by

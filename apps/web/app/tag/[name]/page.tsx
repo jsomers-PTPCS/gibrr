@@ -13,13 +13,30 @@ import { PostItem } from "../../../components/PostItem";
 export default function TagPage() {
   const { name } = useParams<{ name: string }>();
   const [posts, setPosts] = useState<Post[] | "loading" | "error">("loading");
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     setPosts("loading");
     getTagPosts(name)
-      .then((res) => setPosts(res.posts))
+      .then((res) => {
+        setPosts(res.posts);
+        setNextCursor(res.nextCursor);
+      })
       .catch(() => setPosts("error"));
   }, [name]);
+
+  async function handleLoadMore() {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const res = await getTagPosts(name, nextCursor);
+      setPosts((prev) => (Array.isArray(prev) ? [...prev, ...res.posts] : prev));
+      setNextCursor(res.nextCursor);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   return (
     <main className="page">
@@ -36,6 +53,17 @@ export default function TagPage() {
             <PostItem key={post.id} post={post} />
           ))}
         </ul>
+      )}
+
+      {Array.isArray(posts) && nextCursor && (
+        <button
+          className="btn btn-ghost"
+          onClick={handleLoadMore}
+          disabled={loadingMore}
+          style={{ display: "block", margin: "1rem auto" }}
+        >
+          {loadingMore ? "Loading…" : "See more"}
+        </button>
       )}
     </main>
   );

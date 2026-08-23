@@ -24,6 +24,8 @@ import {
 } from "../../lib/api";
 import { PictureChooser } from "../../components/PictureChooser";
 import { ColorSwatchPicker } from "../../components/ColorSwatchPicker";
+import { EditProfileTab } from "../../components/EditProfileTab";
+import { AdminTab } from "../../components/AdminTab";
 import { FONT_PRESETS, FONT_PRESET_LABELS, type FontPresetKey } from "../../lib/fontPresets";
 import {
   HEADER_PRESETS,
@@ -43,6 +45,19 @@ const DEFAULT_TEXT_COLOR = "#f3eefc";
 
 export default function SettingsPage() {
   const router = useRouter();
+  const [tab, setTab] = useState<"account" | "profile" | "host">("account");
+
+  // Lets a `?tab=profile`/`?tab=host` link (the profile page's "Edit
+  // profile" button, the Nav dropdown's "Host" link) land directly on
+  // that tab — same window-read pattern as the profile page's own
+  // `?tab=bookwyrm` deep link, for the same reason: no
+  // useSearchParams/Suspense boundary needed for one query param read
+  // on mount.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested === "profile" || requested === "host") setTab(requested);
+  }, []);
+
   const [theme, setThemeState] = useState<Theme>("dark");
 
   const [me, setMe] = useState<Me | null | "loading">("loading");
@@ -292,9 +307,28 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="page">
+    <main className={tab === "host" ? "page-wide" : "page"}>
       <h1>Settings</h1>
 
+      <nav className="tabs">
+        <button className={tab === "account" ? "active" : undefined} onClick={() => setTab("account")}>
+          Account
+        </button>
+        <button className={tab === "profile" ? "active" : undefined} onClick={() => setTab("profile")}>
+          Edit profile
+        </button>
+        {typeof me === "object" && me?.isAdmin && (
+          <button className={tab === "host" ? "active" : undefined} onClick={() => setTab("host")}>
+            Host
+          </button>
+        )}
+      </nav>
+
+      {tab === "profile" && typeof me === "object" && me && <EditProfileTab username={me.actor.username} />}
+      {tab === "host" && <AdminTab />}
+
+      {tab === "account" && (
+      <>
       {typeof me === "object" && me && !me.emailVerified && (
         <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}>
           <p style={{ margin: 0 }}>
@@ -662,6 +696,8 @@ export default function SettingsPage() {
             {error && <p className="error-text">{error}</p>}
           </div>
         </form>
+      )}
+      </>
       )}
     </main>
   );

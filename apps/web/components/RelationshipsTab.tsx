@@ -5,11 +5,13 @@ import Link from "next/link";
 import {
   getFriends,
   getFriendRequests,
+  getSentFriendRequests,
   acceptFriendRequest,
   removeFriendship,
   getCommunityMemberships,
   getFamilyLinks,
   getFamilyRequests,
+  getSentFamilyRequests,
   confirmFamilyLink,
   removeFamilyLink,
   createFamilyLink,
@@ -28,17 +30,29 @@ import {
 import { RELATIONSHIP_STATUS_LABELS, type RelationshipStatus } from "../lib/relationshipStatus";
 import { useConfirm } from "./ConfirmDialog";
 
-type ActorRow = ActorSummary & { id: string };
+type ActorRow = ActorSummary & { id: string; bookwyrmHandle?: string | null };
 
 function PersonRow({ person }: { person: ActorRow }) {
   return (
-    <Link
-      href={`/u/${person.username}`}
-      style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "inherit" }}
-    >
-      <Avatar name={person.displayName ?? person.username} size={32} />
-      <span>{person.displayName ?? person.username}</span>
-    </Link>
+    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+      <Link
+        href={`/u/${person.username}`}
+        style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "inherit" }}
+      >
+        <Avatar name={person.displayName ?? person.username} size={32} />
+        <span>{person.displayName ?? person.username}</span>
+      </Link>
+      {person.bookwyrmHandle && (
+        <Link
+          href={`/u/${person.username}?tab=bookwyrm`}
+          title={`${person.displayName ?? person.username}'s BookWyrm activity`}
+          className="pill"
+          style={{ fontSize: "0.8rem" }}
+        >
+          BookWyrm
+        </Link>
+      )}
+    </div>
   );
 }
 
@@ -56,6 +70,7 @@ export function RelationshipsTab({
   const confirm = useConfirm();
   const [friends, setFriends] = useState<ActorRow[] | "loading" | "unavailable">("loading");
   const [friendRequests, setFriendRequests] = useState<ActorRow[]>([]);
+  const [sentFriendRequests, setSentFriendRequests] = useState<ActorRow[]>([]);
 
   const [memberships, setMemberships] = useState<Community[] | "loading">("loading");
 
@@ -63,6 +78,7 @@ export function RelationshipsTab({
     "loading",
   );
   const [familyRequests, setFamilyRequests] = useState<FamilyLinkRequest[]>([]);
+  const [sentFamilyRequests, setSentFamilyRequests] = useState<FamilyLinkRequest[]>([]);
   const [newRelativeUsername, setNewRelativeUsername] = useState("");
   const [newRelationType, setNewRelationType] = useState<FamilyRelationType>("partner");
   const [familyError, setFamilyError] = useState<string | null>(null);
@@ -79,7 +95,9 @@ export function RelationshipsTab({
 
     if (isOwnProfile) {
       getFriendRequests().then(setFriendRequests);
+      getSentFriendRequests().then(setSentFriendRequests);
       getFamilyRequests().then(setFamilyRequests);
+      getSentFamilyRequests().then(setSentFamilyRequests);
     }
   }, [username, isOwnProfile]);
 
@@ -92,6 +110,11 @@ export function RelationshipsTab({
   async function handleDeclineFriend(person: ActorRow) {
     await removeFriendship(person.username);
     setFriendRequests((prev) => prev.filter((r) => r.id !== person.id));
+  }
+
+  async function handleCancelSentFriendRequest(person: ActorRow) {
+    await removeFriendship(person.username);
+    setSentFriendRequests((prev) => prev.filter((r) => r.id !== person.id));
   }
 
   async function handleConfirmFamily(request: FamilyLinkRequest) {
@@ -107,6 +130,11 @@ export function RelationshipsTab({
   async function handleDeclineFamily(request: FamilyLinkRequest) {
     await removeFamilyLink(request.id);
     setFamilyRequests((prev) => prev.filter((r) => r.id !== request.id));
+  }
+
+  async function handleCancelSentFamily(request: FamilyLinkRequest) {
+    await removeFamilyLink(request.id);
+    setSentFamilyRequests((prev) => prev.filter((r) => r.id !== request.id));
   }
 
   async function handleRemoveFamilyMember(member: FamilyMember) {
@@ -155,6 +183,27 @@ export function RelationshipsTab({
                       Decline
                     </button>
                   </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {isOwnProfile && sentFriendRequests.length > 0 && (
+          <div style={{ marginBottom: "1rem" }}>
+            <p className="text-faint" style={{ margin: "0 0 0.5rem" }}>
+              Sent
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {sentFriendRequests.map((person) => (
+                <div
+                  key={person.id}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}
+                >
+                  <PersonRow person={person} />
+                  <button className="btn btn-ghost" onClick={() => handleCancelSentFriendRequest(person)}>
+                    Cancel
+                  </button>
                 </div>
               ))}
             </div>
@@ -224,6 +273,30 @@ export function RelationshipsTab({
                       Decline
                     </button>
                   </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {isOwnProfile && sentFamilyRequests.length > 0 && (
+          <div style={{ marginBottom: "1rem" }}>
+            <p className="text-faint" style={{ margin: "0 0 0.5rem" }}>
+              Sent
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {sentFamilyRequests.map((request) => (
+                <div
+                  key={request.id}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}
+                >
+                  <span>
+                    You added <PersonRow person={request.actor} /> as your{" "}
+                    {FAMILY_RELATION_LABELS[request.relationType].toLowerCase()} — waiting to confirm
+                  </span>
+                  <button className="btn btn-ghost" onClick={() => handleCancelSentFamily(request)}>
+                    Cancel
+                  </button>
                 </div>
               ))}
             </div>

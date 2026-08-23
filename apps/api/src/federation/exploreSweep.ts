@@ -1,8 +1,9 @@
 import { prisma } from "../db.js";
 import { logger } from "../logger.js";
 import { getOrCreateInstanceActor } from "./localActor.js";
-import { fetchExploreTimeline } from "./mastodonExplore.js";
+import { fetchExploreTimelineForDomain } from "./exploreDispatch.js";
 import { resolveAndCacheRemotePost } from "./remotePost.js";
+import { resolveAndCacheFunkwhaleTrack } from "./funkwhaleExplore.js";
 
 // Turns Explore from a live, uncached read into something that actually
 // shows up in a viewer's own feed over time: for every server that has
@@ -24,7 +25,7 @@ export async function runExploreSweep(): Promise<void> {
   const instanceActor = await getOrCreateInstanceActor();
 
   for (const server of servers) {
-    await sweepServer(server.id, server.domain, instanceActor);
+    await sweepServer(server, instanceActor);
   }
 }
 
@@ -32,24 +33,27 @@ export async function runExploreSweep(): Promise<void> {
 // one-off sweep for just the server someone subscribed to, rather than
 // making them wait for the next interval tick to see anything.
 export async function sweepServer(
-  serverId: string,
-  domain: string,
+  server: { id: string; domain: string; oauthAccessToken?: string | null },
   instanceActor: Awaited<ReturnType<typeof getOrCreateInstanceActor>>,
 ): Promise<void> {
-  const statuses = await fetchExploreTimeline(domain);
+  const statuses = await fetchExploreTimelineForDomain(server.domain, server.oauthAccessToken ?? undefined);
   if (!statuses) return;
 
   for (const status of statuses) {
     try {
-      const postId = await resolveAndCacheRemotePost(status.url, instanceActor);
+      // Funkwhale's own real caching path — see funkwhaleExplore.ts's
+      // own comment on why it can't reuse resolveAndCacheRemotePost.
+      const postId = status.funkwhaleTrack
+        ? await resolveAndCacheFunkwhaleTrack(status, instanceActor)
+        : await resolveAndCacheRemotePost(status.url, instanceActor);
       if (!postId) continue;
       await prisma.exploreCachedPost.upsert({
-        where: { serverId_postId: { serverId, postId } },
-        create: { serverId, postId },
+        where: { serverId_postId: { serverId: server.id, postId } },
+        create: { serverId: server.id, postId },
         update: {},
       });
     } catch (err) {
-      logger.warn({ err, url: status.url, domain }, "explore sweep failed to cache a status");
+      logger.warn({ err, url: status.url, domain: server.domain }, "explore sweep failed to cache a status");
     }
   }
 }

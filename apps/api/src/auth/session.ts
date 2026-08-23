@@ -2,14 +2,14 @@ import type { NextFunction, Request, Response } from "express";
 import type { Actor, LocalUser } from "@prisma/client";
 import { prisma } from "../db.js";
 
-export const SESSION_COOKIE = "astrion_session";
+export const SESSION_COOKIE = "gibrr_session";
 // Every other account signed in on this browser — lets Nav's account
 // switcher (GET /auth/sessions, POST /auth/switch) move the *active*
 // cookie between already-authenticated sessions without a password
 // prompt each time. Just a list of session IDs; cookie-parser's
 // built-in "j:"-prefixed JSON cookie support serializes/parses it as a
 // plain array automatically, no manual JSON.stringify/parse needed.
-export const SESSION_POOL_COOKIE = "astrion_session_pool";
+export const SESSION_POOL_COOKIE = "gibrr_session_pool";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX_POOLED_SESSIONS = 5;
 

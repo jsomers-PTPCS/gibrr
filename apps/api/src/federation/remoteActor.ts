@@ -3,6 +3,8 @@ import { prisma } from "../db.js";
 import { schemeFor } from "./urls.js";
 import { signedGet } from "./deliver.js";
 import { isDomainBlocked } from "./domainBlocks.js";
+import { toDescriptionHtml } from "./descriptionHtml.js";
+import { logger } from "../logger.js";
 
 export interface RemoteActorPayload {
   id: string;
@@ -48,7 +50,17 @@ export async function fetchRemoteObject(
 ): Promise<Record<string, unknown> | null> {
   const response = await signedGet(iri, signAs);
   if (!response.ok) return null;
-  return (await response.json()) as Record<string, unknown>;
+  try {
+    return (await response.json()) as Record<string, unknown>;
+  } catch (err) {
+    // A 200 doesn't guarantee a real AP JSON body — confirmed live: a
+    // Ghost blog permalink returns 200 text/html regardless of Accept,
+    // which previously 500'd every caller (resolveAndCacheRemotePost,
+    // inbox processing, GET /posts/resolve) instead of the graceful
+    // "couldn't resolve this" every other failure mode here already gets.
+    logger.warn({ err, iri }, "remote object fetch returned a non-JSON body");
+    return null;
+  }
 }
 
 // Given a fediverse handle ("user@domain"), webfinger-discovers the
@@ -94,6 +106,13 @@ export async function upsertRemoteActor(remote: RemoteActorPayload) {
       ? remote.type
       : "Person";
 
+  // A real actor's summary is Mastodon-flavored HTML, not plain text —
+  // sanitized down to the same safe subset (and, incidentally, the same
+  // pipeline) a remote group's description already goes through, so it's
+  // safe for the profile page to render with dangerouslySetInnerHTML
+  // instead of showing the raw tags as text.
+  const summary = remote.summary ? toDescriptionHtml(remote.summary) : remote.summary;
+
   return prisma.actor.upsert({
     where: { username_domain: { username, domain: url.host } },
     create: {
@@ -101,7 +120,7 @@ export async function upsertRemoteActor(remote: RemoteActorPayload) {
       domain: url.host,
       type,
       displayName: remote.name,
-      summary: remote.summary,
+      summary,
       avatarImageUrl: remote.icon?.url ?? null,
       headerImageUrl: remote.image?.url ?? null,
       publicKey: remote.publicKey?.publicKeyPem ?? "",
@@ -110,7 +129,7 @@ export async function upsertRemoteActor(remote: RemoteActorPayload) {
     },
     update: {
       displayName: remote.name,
-      summary: remote.summary,
+      summary,
       avatarImageUrl: remote.icon?.url ?? null,
       headerImageUrl: remote.image?.url ?? null,
       publicKey: remote.publicKey?.publicKeyPem ?? "",

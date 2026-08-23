@@ -282,7 +282,7 @@ select.input:focus {
   flex-shrink: 0;
 }
 
-/* Federated/Circles/search/Host — the links that don't fit a narrow
+/* Federated/Circles/search — the links that don't fit a narrow
    phone screen alongside the logo and account button. Collapses behind
    .nav-toggle below the breakpoint instead of forcing the whole page to
    scroll sideways (the actual bug this pair of rules exists to prevent). */

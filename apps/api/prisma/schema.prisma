@@ -31,6 +31,14 @@ model Actor {
   pronouns    String?
   location    String?
   website     String?
+  // A linked BookWyrm (or other book-tracking AP software) account —
+  // "user@domain", same handle format as following anyone else on the
+  // fediverse. Public like website (not gated by aboutVisibility below):
+  // presence of the handle is harmless to show, the actual reading
+  // activity behind it is what's access-controlled, at fetch time, to
+  // the owner and their accepted friends only (routes/profile.ts's
+  // GET /profile/:username/bookwyrm) — see federation/bookwyrmActivity.ts.
+  bookwyrmHandle String?
 
   // "About" section — see federation/aboutFields.ts for the shared field
   // key list and routes/profile.ts for the redaction logic. Default is
@@ -397,15 +405,21 @@ model Post {
   eventEnd      DateTime?
   eventLocation String?
 
-  // Optional media attachment — at most one of the two is ever set
-  // (enforced in routes/posts.ts's createPostSchema, not the DB).
-  // imageUrl is re-encoded via saveProcessedImage same as any other
-  // uploaded image; videoUrl is stored as-is (no transcoding pipeline
-  // exists) after magic-byte validation — see routes/posts.ts's
-  // POST /posts/media. location is a free-text tag, e.g. "Carowinds",
-  // independent of either.
+  // Optional media attachment. For a locally-created post, at most one
+  // of imageUrl/videoUrl is ever set (enforced in routes/posts.ts's
+  // createPostSchema, not the DB) — imageUrl re-encoded via
+  // saveProcessedImage same as any other uploaded image, videoUrl
+  // stored as-is (no transcoding pipeline exists) after magic-byte
+  // validation, see routes/posts.ts's POST /posts/media. Federated
+  // content cached via Explore can set imageUrl *and* one of
+  // videoUrl/audioUrl together (a PeerTube video's thumbnail, a
+  // Funkwhale track's album art) — see federation/remotePost.ts and
+  // federation/funkwhaleExplore.ts. audioUrl exists only for Funkwhale
+  // tracks; nothing local can create one. location is a free-text tag,
+  // e.g. "Carowinds", independent of all three.
   imageUrl String?
   videoUrl String?
+  audioUrl String?
   location String?
 
   // Extracted from body at creation/edit time (local) or parsed from the
@@ -895,6 +909,19 @@ model ExploreServer {
   name      String?
   createdAt DateTime @default(now())
 
+  // OAuth2 app-registration + user-token credentials, for servers whose
+  // public timeline requires an authenticated request (e.g. Pixelfed
+  // 0.12+, which locks down /api/v1/timelines/public entirely even for
+  // app-level tokens — only a real user's Authorization Code grant
+  // works, see federation/mastodonOAuth.ts). Null for servers whose
+  // plain public endpoint already works. Plaintext, same disclosed
+  // no-at-rest-encryption posture as CalendarConnection/
+  // LocalUser.twoFactorSecret elsewhere in this app.
+  oauthClientId     String?
+  oauthClientSecret String?
+  oauthAccessToken  String?
+  oauthPendingState String? @unique // set while a connect flow is in flight; cleared on success
+
   subscriptions ExploreSubscription[]
   cachedPosts   ExploreCachedPost[]
 }
@@ -931,4 +958,19 @@ model ExploreCachedPost {
   post   Post          @relation(fields: [postId], references: [id])
 
   @@unique([serverId, postId])
+}
+
+// Singleton row (id is always 1 — see heartbeat.ts, which owns every
+// read/write of this table) tracking this instance's continuous-uptime
+// history *across restarts*, for the Host dashboard's "since last
+// downtime" stat (routes/admin.ts's GET /admin/server-health). Plain
+// process.uptime() resets on every routine deploy, which makes it a
+// poor proxy for real availability; this instead only advances
+// lastDowntimeAt when a startup finds a gap since the last heartbeat
+// bigger than heartbeat.ts's own detection threshold — a real outage
+// (crash or otherwise), not just a normal deploy restart.
+model InstanceHeartbeat {
+  id             Int      @id
+  lastAliveAt    DateTime
+  lastDowntimeAt DateTime
 }

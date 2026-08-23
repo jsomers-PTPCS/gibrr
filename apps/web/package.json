@@ -1,5 +1,5 @@
 {
-  "name": "@astrion/web",
+  "name": "@gibrr/web",
   "private": true,
   "scripts": {
     "dev": "next dev",

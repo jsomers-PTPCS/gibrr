@@ -19,7 +19,7 @@ COPY apps/web apps/web
 # variable on the container.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-RUN pnpm --filter @astrion/web build
+RUN pnpm --filter @gibrr/web build
 
 FROM base AS runner
 ENV NODE_ENV=production

@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
-  getMe,
   getProfile,
   updateProfile,
   connectCalendar,
@@ -15,24 +13,39 @@ import {
   getImmichStatus,
   disconnectImmich,
   ApiError,
-  type Me,
   type Profile,
   type CalendarStatus,
-} from "../../../../lib/api";
+} from "../lib/api";
 import {
   ABOUT_FIELD_LABELS,
   CALENDAR_VISIBILITY_LABEL,
   IMMICH_VISIBILITY_LABEL,
   type AboutFieldKey,
-} from "../../../../lib/aboutFields";
+} from "../lib/aboutFields";
 import {
   RELATIONSHIP_STATUSES,
   RELATIONSHIP_STATUS_LABELS,
   type RelationshipStatus,
-} from "../../../../lib/relationshipStatus";
+} from "../lib/relationshipStatus";
 
 function toDateInputValue(iso: string | null): string {
   return iso ? iso.slice(0, 10) : "";
+}
+
+// PATCH /profile now stores summary as HTML — plain text promoted to
+// one <p> per blank-line-separated block (federation/descriptionHtml.ts's
+// toDescriptionHtml; a local bio is never anything richer than that,
+// since this plain textarea is the only way to write one). Reversing
+// that — one block of text per <p>, blank line between blocks — is what
+// keeps a re-opened edit form showing readable text instead of literal
+// "<p>" tags; re-saving without touching it round-trips back to the
+// same HTML. Falls back to the raw value for the (rare, pre-migration)
+// case where a stored summary somehow isn't real markup at all.
+function htmlSummaryToPlainText(html: string): string {
+  if (typeof window === "undefined" || !/<[a-z][\s\S]*>/i.test(html)) return html;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const blocks = Array.from(doc.body.children).map((el) => el.textContent ?? "");
+  return blocks.length > 0 ? blocks.join("\n\n") : (doc.body.textContent ?? html);
 }
 
 function VisibilityToggle({
@@ -59,18 +72,23 @@ function VisibilityToggle({
   );
 }
 
-export default function EditProfilePage() {
-  const { username } = useParams<{ username: string }>();
+// Formerly its own app/u/[username]/edit/page.tsx — now the Settings
+// page's "Edit profile" tab (app/settings/page.tsx). `username` is
+// always the logged-in viewer's own (the parent only ever renders this
+// for `me`), so unlike the old page there's no "is this really my own
+// profile" gate to check — that ambiguity only existed when this was a
+// route anyone could type a different username into.
+export function EditProfileTab({ username }: { username: string }) {
   const router = useRouter();
 
   const [profile, setProfile] = useState<Profile | "loading" | "error">("loading");
-  const [me, setMe] = useState<Me | null | "loading">("loading");
 
   const [displayName, setDisplayName] = useState("");
   const [summary, setSummary] = useState("");
   const [pronouns, setPronouns] = useState("");
   const [location, setLocation] = useState("");
   const [website, setWebsite] = useState("");
+  const [bookwyrmHandle, setBookwyrmHandle] = useState("");
 
   const [workplace, setWorkplace] = useState("");
   const [hometown, setHometown] = useState("");
@@ -107,10 +125,11 @@ export default function EditProfilePage() {
       .then((p) => {
         setProfile(p);
         setDisplayName(p.actor.displayName ?? "");
-        setSummary(p.actor.summary ?? "");
+        setSummary(p.actor.summary ? htmlSummaryToPlainText(p.actor.summary) : "");
         setPronouns(p.actor.pronouns ?? "");
         setLocation(p.actor.location ?? "");
         setWebsite(p.actor.website ?? "");
+        setBookwyrmHandle(p.actor.bookwyrmHandle ?? "");
         setWorkplace(p.actor.workplace ?? "");
         setHometown(p.actor.hometown ?? "");
         setDateOfBirth(toDateInputValue(p.actor.dateOfBirth));
@@ -129,9 +148,6 @@ export default function EditProfilePage() {
         );
       })
       .catch(() => setProfile("error"));
-    getMe()
-      .then(setMe)
-      .catch(() => setMe(null));
     getCalendarStatus()
       .then(setCalendarStatus)
       .catch(() => setCalendarStatus({ connected: false }));
@@ -139,13 +155,6 @@ export default function EditProfilePage() {
       .then((s) => setImmichConnected(s.connected))
       .catch(() => setImmichConnected(false));
   }, [username]);
-
-  useEffect(() => {
-    if (me === "loading" || profile === "loading" || profile === "error") return;
-    const isOwnProfile = me?.actor.username === profile.actor.username;
-    if (!isOwnProfile) router.replace(`/u/${username}`);
-  }, [me, profile, username, router]);
-
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
@@ -158,6 +167,7 @@ export default function EditProfilePage() {
         pronouns: pronouns || undefined,
         location: location || undefined,
         website: website || undefined,
+        bookwyrmHandle: bookwyrmHandle || undefined,
         workplace: workplace || undefined,
         hometown: hometown || undefined,
         dateOfBirth: dateOfBirth ? new Date(dateOfBirth).toISOString() : undefined,
@@ -281,13 +291,11 @@ export default function EditProfilePage() {
     }
   }
 
-  if (profile === "loading" || me === "loading") return <main className="page">Loading…</main>;
-  if (profile === "error") return <main className="page">Could not load this profile.</main>;
+  if (profile === "loading") return <p className="text-dim">Loading…</p>;
+  if (profile === "error") return <p className="error-text">Could not load this profile.</p>;
 
   return (
-    <main className="page">
-      <h1>Edit profile</h1>
-
+    <>
       <form onSubmit={handleSave}>
         <div className="card">
           <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Basic info</h2>
@@ -326,13 +334,24 @@ export default function EditProfilePage() {
               placeholder="example.com"
             />
           </label>
+          <label className="field">
+            BookWyrm account
+            <input
+              className="input"
+              value={bookwyrmHandle}
+              onChange={(e) => setBookwyrmHandle(e.target.value)}
+              placeholder="you@bookwyrm.social"
+            />
+            <span className="text-faint" style={{ fontSize: "0.85rem" }}>
+              Adds a BookWyrm tab to your profile — visible to you and your friends.
+            </span>
+          </label>
         </div>
 
         <div className="card">
           <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Appearance</h2>
           <p className="text-faint" style={{ margin: 0 }}>
-            Fonts, colors, profile photo, header, and background have moved to{" "}
-            <Link href="/settings">Settings</Link>.
+            Fonts, colors, profile photo, header, and background are on the Account tab.
           </p>
         </div>
 
@@ -694,6 +713,6 @@ export default function EditProfilePage() {
         </div>
         {error && <p className="error-text">{error}</p>}
       </form>
-    </main>
+    </>
   );
 }

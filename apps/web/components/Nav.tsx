@@ -15,6 +15,7 @@ import {
 } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { Logo } from "./Logo";
+import { LoopsIcon } from "./icons";
 
 export function Nav() {
   const router = useRouter();
@@ -25,7 +26,7 @@ export function Nav() {
   const [sessions, setSessions] = useState<SessionAccount[]>([]);
   const [switching, setSwitching] = useState<string | null>(null);
   const switcherRef = useRef<HTMLDivElement>(null);
-  // Federated/Circles/search/Host collapse behind this on a narrow phone
+  // Federated/Circles/search collapse behind this on a narrow phone
   // screen (see .nav-toggle/.nav-links in globals.css) — without it, that
   // whole row is wider than the viewport and the entire page scrolls
   // sideways to show it.
@@ -108,6 +109,10 @@ export function Nav() {
         GIBRR
       </Link>
 
+      <Link href="/loops" aria-label="Loops" title="Loops" style={{ display: "flex", alignItems: "center", color: "var(--text)" }}>
+        <LoopsIcon width={24} height={24} />
+      </Link>
+
       <button
         type="button"
         className="nav-toggle btn btn-ghost"
@@ -143,12 +148,6 @@ export function Nav() {
             style={{ width: "100%" }}
           />
         </form>
-
-        {me !== "loading" && me?.isAdmin && (
-          <Link href="/admin" style={{ whiteSpace: "nowrap" }} onClick={() => setMobileOpen(false)}>
-            Host
-          </Link>
-        )}
       </div>
 
       <div className="nav-spacer" />
@@ -188,20 +187,6 @@ export function Nav() {
                   style={{ display: "block", padding: "0.4rem 0.5rem", color: "inherit" }}
                 >
                   Me
-                </Link>
-                <Link
-                  href="/bookmarks"
-                  onClick={() => setSwitcherOpen(false)}
-                  style={{ display: "block", padding: "0.4rem 0.5rem", color: "inherit" }}
-                >
-                  Keeps
-                </Link>
-                <Link
-                  href="/antennas"
-                  onClick={() => setSwitcherOpen(false)}
-                  style={{ display: "block", padding: "0.4rem 0.5rem", color: "inherit" }}
-                >
-                  Watching
                 </Link>
 
                 {sessions.length > 1 && (

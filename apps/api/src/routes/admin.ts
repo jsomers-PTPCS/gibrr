@@ -1,15 +1,25 @@
+import crypto from "node:crypto";
+import { execFile } from "node:child_process";
+import { mkdir } from "node:fs/promises";
+import { promisify } from "node:util";
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
+import { UPLOADS_DIR } from "../uploads.js";
+import { getLastDowntimeAt } from "../heartbeat.js";
+import { logger } from "../logger.js";
 import { requireAuth, requireAdmin } from "../auth/session.js";
 import { deletePosts, deleteCommentSubtree, deleteActor } from "../deletion.js";
 import { deleteActivity, postObjectIri, followActivity, undoFollowActivity } from "../federation/activities.js";
 import { deliverToFollowers, deliverActivity } from "../federation/deliver.js";
-import { getOrCreateInstanceActor, actorIri } from "../federation/localActor.js";
+import { getOrCreateInstanceActor, actorIri, localDomain } from "../federation/localActor.js";
+import { originFor } from "../federation/urls.js";
 import { fetchRemoteActor, upsertRemoteActor } from "../federation/remoteActor.js";
 import { searchRelayDirectory } from "../federation/relayDirectory.js";
 import { normalizeDomain } from "../federation/domainBlocks.js";
-import { fetchExploreTimeline } from "../federation/mastodonExplore.js";
+import { fetchExploreTimelineForDomain } from "../federation/exploreDispatch.js";
+import { registerOAuthApp, buildAuthorizeUrl, exchangeCodeForToken } from "../federation/mastodonOAuth.js";
+import { webOrigin } from "./auth.js";
 
 // A real hostname shape (labels of letters/digits/hyphens joined by
 // dots, at least one dot so a bare typo'd single word gets rejected
@@ -32,6 +42,96 @@ const domainShapeSchema = z
 export const adminRouter = Router();
 
 adminRouter.use(requireAuth, requireAdmin);
+
+const execFileAsync = promisify(execFile);
+
+// Bytes used by this instance's own data on the server's disk — the
+// uploads directory (photos, avatars, custom emoji, etc: everything
+// under uploads.ts's UPLOADS_DIR) via `du`, since that's the correct
+// tool for "real bytes on disk" (accounts for sparse files/holes,
+// unlike summing st_size over a manual directory walk). Returns null
+// rather than throwing if `du` isn't available or the directory can't
+// be read yet (e.g. a brand new instance with no uploads directory on
+// disk at all) — this is diagnostic info, not something that should
+// ever break the page it's on.
+async function getUploadsSizeBytes(): Promise<number | null> {
+  try {
+    const { stdout } = await execFileAsync("du", ["-sb", UPLOADS_DIR]);
+    const bytes = parseInt(stdout.split(/\s+/)[0], 10);
+    return Number.isFinite(bytes) ? bytes : null;
+  } catch (err) {
+    logger.warn({ err }, "server health: du failed for uploads directory");
+    return null;
+  }
+}
+
+// Total/used/available space on whatever disk actually backs the uploads
+// directory — in this app's own single-VPS deployment model (see
+// DEPLOY.md), that's the same disk everything else lives on, so this
+// doubles as "the server's disk" rather than needing a separate host-
+// level check the API container has no access to anyway. `df -P -B1`
+// forces POSIX single-line output with byte-exact (not human-rounded)
+// figures, so this doesn't depend on parsing `df`'s locale/unit
+// formatting.
+async function getDiskSpace(): Promise<{ totalBytes: number; usedBytes: number; availableBytes: number } | null> {
+  try {
+    const { stdout } = await execFileAsync("df", ["-P", "-B1", UPLOADS_DIR]);
+    const dataLine = stdout.trim().split("\n")[1];
+    const columns = dataLine?.split(/\s+/) ?? [];
+    const [, totalBytes, usedBytes, availableBytes] = columns.map((c) => parseInt(c, 10));
+    if (![totalBytes, usedBytes, availableBytes].every(Number.isFinite)) return null;
+    return { totalBytes, usedBytes, availableBytes };
+  } catch (err) {
+    logger.warn({ err }, "server health: df failed for uploads directory");
+    return null;
+  }
+}
+
+// GET /admin/server-health -> the Host dashboard's at-a-glance operational
+// panel: is the database actually reachable right now (not just "did the
+// API process start"), how much of the server's disk this instance's own
+// data (database + uploads) is actually using, and how much room is left
+// on that disk. All best-effort — a failed sub-check degrades that one
+// field to null/false rather than 500ing the whole panel, since this is
+// read-only diagnostics an admin is checking, not something that should
+// ever itself become the thing that's broken.
+adminRouter.get("/admin/server-health", async (_req, res) => {
+  let databaseConnected = true;
+  let databaseSizeBytes: number | null = null;
+  try {
+    const rows = await prisma.$queryRaw<{ size: bigint }[]>`SELECT pg_database_size(current_database()) AS size`;
+    databaseSizeBytes = Number(rows[0].size);
+  } catch (err) {
+    databaseConnected = false;
+    logger.warn({ err }, "server health: database size query failed");
+  }
+
+  // A brand new instance with no uploads yet has no uploads directory on
+  // disk at all (it's only ever created lazily, on the first actual
+  // upload — see uploads.ts) — df/du both need a real path to target, so
+  // make sure one exists rather than the whole disk section going null
+  // just because nobody's uploaded anything.
+  await mkdir(UPLOADS_DIR, { recursive: true }).catch((err) => {
+    logger.warn({ err }, "server health: could not ensure uploads directory exists");
+  });
+
+  const [uploadsSizeBytes, disk, lastDowntimeAt] = await Promise.all([
+    getUploadsSizeBytes(),
+    getDiskSpace(),
+    getLastDowntimeAt(),
+  ]);
+
+  res.json({
+    active: databaseConnected,
+    uptimeSeconds: Math.floor(process.uptime()),
+    lastDowntimeAt: lastDowntimeAt?.toISOString() ?? null,
+    database: { connected: databaseConnected, sizeBytes: databaseSizeBytes },
+    uploads: { sizeBytes: uploadsSizeBytes },
+    usedByInstanceBytes:
+      databaseSizeBytes !== null && uploadsSizeBytes !== null ? databaseSizeBytes + uploadsSizeBytes : null,
+    disk,
+  });
+});
 
 // GET /admin/users -> every local account, for the admin dashboard's user
 // table. Uncapped-but-reasonable (take: 200) — matches this app's existing
@@ -295,9 +395,29 @@ const exploreServerSchema = z.object({
   name: z.string().max(100).optional(),
 });
 
+// Selected explicitly (never a bare findMany/upsert) so the OAuth
+// columns added alongside the Connect-via-OAuth flow below can never
+// end up in a JSON response — oauthAccessToken is only ever read back
+// as the boolean "connected", never the token itself.
+const EXPLORE_SERVER_SELECT = {
+  id: true,
+  domain: true,
+  name: true,
+  createdAt: true,
+  oauthAccessToken: true,
+} as const;
+
+function toPublicExploreServer<T extends { oauthAccessToken: string | null }>(server: T) {
+  const { oauthAccessToken, ...rest } = server;
+  return { ...rest, connected: oauthAccessToken !== null };
+}
+
 adminRouter.get("/admin/explore-servers", async (_req, res) => {
-  const servers = await prisma.exploreServer.findMany({ orderBy: { createdAt: "desc" } });
-  res.json(servers);
+  const servers = await prisma.exploreServer.findMany({
+    orderBy: { createdAt: "desc" },
+    select: EXPLORE_SERVER_SELECT,
+  });
+  res.json(servers.map(toPublicExploreServer));
 });
 
 adminRouter.post("/admin/explore-servers", async (req, res) => {
@@ -311,11 +431,15 @@ adminRouter.post("/admin/explore-servers", async (req, res) => {
   // page, a real server that just isn't Mastodon-API-compatible) —
   // by actually trying the same live request Explore itself will make,
   // right here at add-time instead of leaving it to fail silently the
-  // first time someone visits.
-  const statuses = await fetchExploreTimeline(domain);
+  // first time someone visits. Servers that need a login (Pixelfed and
+  // friends) will fail this the same way an unreachable domain does —
+  // that's expected, and is exactly what the Connect-via-OAuth flow
+  // below is for.
+  const statuses = await fetchExploreTimelineForDomain(domain);
   if (!statuses) {
     return res.status(422).json({
-      error: "could not verify that domain — check for typos, or it may not run Mastodon-compatible software",
+      error:
+        "could not verify that domain — check for typos, or it may require Connect via OAuth instead of Add server",
     });
   }
 
@@ -323,8 +447,78 @@ adminRouter.post("/admin/explore-servers", async (req, res) => {
     where: { domain },
     create: { domain, name: parsed.data.name },
     update: { name: parsed.data.name },
+    select: EXPLORE_SERVER_SELECT,
   });
-  res.status(201).json(server);
+  res.status(201).json(toPublicExploreServer(server));
+});
+
+// Connect-via-OAuth: for servers whose public timeline requires a
+// logged-in user (e.g. Pixelfed 0.12+ — see federation/mastodonOAuth.ts's
+// own comment on why a plain client_credentials token isn't enough).
+// Step 1 registers a throwaway OAuth app with the target server and
+// sends the admin's browser there to log in and authorize it; step 2
+// (the callback below) is where that server redirects back to once
+// they do, with a code this exchanges for a user-scoped access token.
+adminRouter.post("/admin/explore-servers/:domain/oauth/start", async (req, res) => {
+  const domain = normalizeDomain(req.params.domain);
+  if (!domainShapeSchema.safeParse(domain).success) {
+    return res.status(400).json({ error: "doesn't look like a real domain (check for typos)" });
+  }
+  const name = typeof req.body?.name === "string" ? req.body.name.trim().slice(0, 100) || undefined : undefined;
+
+  const redirectUri = `${originFor(localDomain())}/admin/explore-servers/oauth/callback`;
+  const app = await registerOAuthApp(domain, redirectUri);
+  if (!app) {
+    return res.status(422).json({
+      error: "could not register with that server — check for typos, or it may not support Mastodon-API OAuth",
+    });
+  }
+
+  const state = crypto.randomBytes(32).toString("hex");
+  await prisma.exploreServer.upsert({
+    where: { domain },
+    create: { domain, name, oauthClientId: app.clientId, oauthClientSecret: app.clientSecret, oauthPendingState: state },
+    update: { oauthClientId: app.clientId, oauthClientSecret: app.clientSecret, oauthPendingState: state },
+  });
+
+  res.status(201).json({ authorizeUrl: buildAuthorizeUrl(domain, app.clientId, redirectUri, state) });
+});
+
+// Hit directly by the admin's browser being redirected here from the
+// target server's own /oauth/authorize page — not called from the SPA,
+// so this responds with a redirect back into the Host UI rather than
+// JSON. Same-site-lax session cookie still rides along on this
+// top-level cross-site redirect, so requireAuth/requireAdmin above
+// still identify the admin normally.
+adminRouter.get("/admin/explore-servers/oauth/callback", async (req, res) => {
+  const state = typeof req.query.state === "string" ? req.query.state : "";
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+
+  const server = state ? await prisma.exploreServer.findUnique({ where: { oauthPendingState: state } }) : null;
+  if (!server || !code || !server.oauthClientId || !server.oauthClientSecret) {
+    return res.redirect(`${webOrigin()}/settings?tab=host&exploreOauth=error`);
+  }
+
+  const redirectUri = `${originFor(localDomain())}/admin/explore-servers/oauth/callback`;
+  const accessToken = await exchangeCodeForToken(
+    server.domain,
+    server.oauthClientId,
+    server.oauthClientSecret,
+    redirectUri,
+    code,
+  );
+  if (!accessToken) {
+    await prisma.exploreServer.update({ where: { id: server.id }, data: { oauthPendingState: null } });
+    return res.redirect(
+      `${webOrigin()}/settings?tab=host&exploreOauth=error&domain=${encodeURIComponent(server.domain)}`,
+    );
+  }
+
+  await prisma.exploreServer.update({
+    where: { id: server.id },
+    data: { oauthAccessToken: accessToken, oauthPendingState: null },
+  });
+  res.redirect(`${webOrigin()}/settings?tab=host&exploreOauth=success&domain=${encodeURIComponent(server.domain)}`);
 });
 
 adminRouter.delete("/admin/explore-servers/:domain", async (req, res) => {

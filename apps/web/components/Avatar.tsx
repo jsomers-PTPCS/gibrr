@@ -34,7 +34,13 @@ export function Avatar({
         alt={name}
         width={size}
         height={size}
-        style={{ borderRadius: "50%", objectFit: "cover", display: "block" }}
+        // width/height as plain attributes lose to the global `img,
+        // video { max-width: 100%; height: auto }` reset in
+        // globals.css (a CSS rule always beats an HTML attribute) —
+        // repeating them in style is what actually pins the box to a
+        // square, which is what keeps a non-square source photo a
+        // circle instead of an oval once objectFit crops it in.
+        style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", display: "block" }}
       />
     );
   }

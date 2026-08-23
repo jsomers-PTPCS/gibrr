@@ -41,9 +41,9 @@ import { GroupTagPreview } from "./GroupTagPreview";
 import { PostComments } from "./PostComments";
 import { LinkifiedText } from "./LinkifiedText";
 import { ReportButton } from "./ReportButton";
-import { AVATAR_PRESETS } from "../lib/imagePresets";
 import { useConfirm } from "./ConfirmDialog";
 import { BoostIcon, BookmarkIcon, CommentIcon, EditIcon, TrashIcon, FlagIcon } from "./icons";
+import { timeAgoLong } from "../lib/timeAgo";
 
 // A remote actor's avatar/header is already an absolute URL (federated
 // via icon/image on their Actor object) — only a local upload's relative
@@ -99,6 +99,7 @@ export function PostItem({
     location: post.location,
     imageUrl: post.imageUrl,
     videoUrl: post.videoUrl,
+    audioUrl: post.audioUrl,
     updatedAt: post.updatedAt,
     contentWarning: post.contentWarning,
   });
@@ -204,6 +205,7 @@ export function PostItem({
         location: updated.location,
         imageUrl: updated.imageUrl,
         videoUrl: updated.videoUrl,
+        audioUrl: updated.audioUrl,
         updatedAt: updated.updatedAt,
         contentWarning: updated.contentWarning,
       });
@@ -413,23 +415,13 @@ export function PostItem({
       <div style={{ display: "flex", gap: "0.9rem" }}>
       <VoteButtons score={score} myVote={myVote} onVote={handleVote} />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.3rem" }}>
-          {post.author.avatarImageUrl || post.author.avatarPreset ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={
-                post.author.avatarImageUrl
-                  ? assetUrl(post.author.avatarImageUrl)
-                  : AVATAR_PRESETS[post.author.avatarPreset!].dataUri
-              }
-              alt={authorLabel}
-              width={28}
-              height={28}
-              style={{ borderRadius: "50%", objectFit: "cover", display: "block" }}
-            />
-          ) : (
-            <Avatar name={authorLabel} size={28} />
-          )}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+          <Avatar
+            name={authorLabel}
+            size={28}
+            imageUrl={post.author.avatarImageUrl}
+            preset={post.author.avatarPreset}
+          />
           <Link href={`/u/${post.author.username}`} style={{ fontWeight: 600, color: boxStyle?.color ?? "var(--text)" }}>
             {authorLabel}
           </Link>
@@ -457,6 +449,14 @@ export function PostItem({
             </button>
           )}
         </div>
+
+        <p
+          className="text-faint"
+          title={new Date(post.createdAt).toLocaleString()}
+          style={{ margin: "0.1rem 0 0.3rem", fontSize: "0.8rem" }}
+        >
+          Posted {timeAgoLong(post.createdAt)}
+        </p>
 
         {content.updatedAt && (
           <p className="text-faint" style={{ margin: "0 0 0.2rem", fontSize: "0.75rem" }}>
@@ -633,6 +633,13 @@ export function PostItem({
                 src={assetUrl(content.videoUrl)}
                 controls
                 style={{ maxWidth: "100%", borderRadius: "var(--radius-sm)", display: "block", margin: "0.5rem 0" }}
+              />
+            )}
+            {content.audioUrl && (
+              <audio
+                src={assetUrl(content.audioUrl)}
+                controls
+                style={{ width: "100%", display: "block", margin: "0.5rem 0" }}
               />
             )}
           </>

@@ -19,8 +19,8 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY apps/api apps/api
-RUN pnpm --filter @astrion/api prisma:generate
-RUN pnpm --filter @astrion/api build
+RUN pnpm --filter @gibrr/api prisma:generate
+RUN pnpm --filter @gibrr/api build
 
 FROM base AS runner
 ENV NODE_ENV=production

@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   getMe,
+  getServerHealth,
   getAdminUsers,
   suspendUser,
   unsuspendUser,
@@ -26,9 +27,11 @@ import {
   getAdminExploreServers,
   addAdminExploreServer,
   removeAdminExploreServer,
+  startExploreServerOAuth,
   API_URL,
   ApiError,
   type Me,
+  type ServerHealth,
   type AdminUserSummary,
   type AdminReport,
   type AdminRelay,
@@ -36,19 +39,47 @@ import {
   type CustomEmoji,
   type DomainBlock,
   type ExploreServer,
-} from "../../lib/api";
-import { Avatar } from "../../components/Avatar";
-import { dedupeDirectoriesByUrl, type FediverseDirectoryLink } from "../../lib/fediverseDirectories";
-import { useConfirm } from "../../components/ConfirmDialog";
+} from "../lib/api";
+import { Avatar } from "./Avatar";
+import { DiskUsageMeter } from "./DiskUsageMeter";
+import { dedupeDirectoriesByUrl, type FediverseDirectoryLink } from "../lib/fediverseDirectories";
+import { useConfirm } from "./ConfirmDialog";
+
+function formatBytes(bytes: number | null): string {
+  if (bytes === null) return "unknown";
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** exponent;
+  return `${value.toFixed(exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+}
+
+function secondsSince(isoTimestamp: string): number {
+  return Math.max(0, Math.floor((Date.now() - new Date(isoTimestamp).getTime()) / 1000));
+}
+
+function formatUptime(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
 
 // Instance-admin dashboard — separate from any per-community management
 // (that lives on the group page itself). Server-side requireAdmin
 // (routes/admin.ts) is the actual security boundary; the me.isAdmin check
-// here is just UX so a non-admin doesn't see a page full of 403s.
-export default function AdminPage() {
+// here is just UX so a non-admin doesn't see a page full of 403s. Lives
+// as the Settings page's "Host" tab (app/settings/page.tsx) rather than
+// its own route — still does its own getMe()/redirect rather than
+// trusting the parent, so a direct `?tab=host` URL from a non-admin
+// still gets kicked out instead of rendering.
+export function AdminTab() {
   const router = useRouter();
   const confirm = useConfirm();
   const [me, setMe] = useState<Me | null | "loading">("loading");
+  const [serverHealth, setServerHealth] = useState<ServerHealth | "loading" | "error">("loading");
   const [users, setUsers] = useState<AdminUserSummary[] | "loading" | "error">("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [reports, setReports] = useState<AdminReport[] | "loading" | "error">("loading");
@@ -87,8 +118,10 @@ export default function AdminPage() {
   const [exploreDomain, setExploreDomain] = useState("");
   const [exploreName, setExploreName] = useState("");
   const [addingExploreServer, setAddingExploreServer] = useState(false);
+  const [connectingExploreOAuth, setConnectingExploreOAuth] = useState(false);
   const [exploreServerError, setExploreServerError] = useState<string | null>(null);
   const [removingExploreDomain, setRemovingExploreDomain] = useState<string | null>(null);
+  const [exploreOauthNotice, setExploreOauthNotice] = useState<{ success: boolean; domain?: string } | null>(null);
 
   useEffect(() => {
     getMe()
@@ -104,6 +137,9 @@ export default function AdminPage() {
       router.replace("/");
       return;
     }
+    getServerHealth()
+      .then(setServerHealth)
+      .catch(() => setServerHealth("error"));
     getAdminUsers()
       .then(setUsers)
       .catch(() => setUsers("error"));
@@ -129,6 +165,19 @@ export default function AdminPage() {
       .catch(() => setExploreServers("error"));
   }
 
+  // The API's OAuth callback (routes/admin.ts) redirects here with
+  // ?exploreOauth=success|error&domain=... once Connect via OAuth
+  // finishes — read via window.location rather than useSearchParams so
+  // this page doesn't need a Suspense boundary just for this.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get("exploreOauth");
+    if (!result) return;
+    setExploreOauthNotice({ success: result === "success", domain: params.get("domain") ?? undefined });
+    refreshExploreServers();
+    router.replace("/settings?tab=host");
+  }, [router]);
+
   async function handleAddExploreServer(e: FormEvent) {
     e.preventDefault();
     if (!exploreDomain.trim()) return;
@@ -149,6 +198,29 @@ export default function AdminPage() {
       );
     } finally {
       setAddingExploreServer(false);
+    }
+  }
+
+  // Full-page navigation to the remote server's own login/consent
+  // screen — for servers like Pixelfed whose public timeline requires
+  // a logged-in user, not just a publicly reachable one. Redirects back
+  // to /admin (handled by the effect above) once the admin authorizes.
+  async function handleConnectExploreServerOAuth() {
+    if (!exploreDomain.trim()) return;
+    setConnectingExploreOAuth(true);
+    setExploreServerError(null);
+    try {
+      const { authorizeUrl } = await startExploreServerOAuth(exploreDomain.trim(), exploreName.trim() || undefined);
+      window.location.href = authorizeUrl;
+    } catch (err) {
+      setExploreServerError(
+        err instanceof ApiError
+          ? typeof err.body === "object" && err.body && "error" in err.body
+            ? String((err.body as { error: unknown }).error)
+            : JSON.stringify(err.body)
+          : "could not start that connection",
+      );
+      setConnectingExploreOAuth(false);
     }
   }
 
@@ -407,12 +479,13 @@ export default function AdminPage() {
     }
   }
 
-  if (me === "loading" || !me?.isAdmin) return <main className="page">Loading…</main>;
+  if (me === "loading" || !me?.isAdmin) return <p className="text-dim">Loading…</p>;
 
   return (
-    <main className="page-wide">
-      <h1>Host</h1>
-      <p className="text-faint">Room-wide account management.</p>
+    <>
+      <p className="text-faint" style={{ marginTop: 0 }}>
+        Room-wide account management.
+      </p>
 
       <div className="card">
         {users === "loading" ? (
@@ -468,6 +541,50 @@ export default function AdminPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+      </div>
+
+      <h2 style={{ marginTop: "1.5rem" }}>Server health</h2>
+      <div className="card" style={{ marginBottom: "1.5rem" }}>
+        {serverHealth === "loading" ? (
+          <p className="text-dim">Loading…</p>
+        ) : serverHealth === "error" ? (
+          <p className="error-text">Could not load server health.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "1.25rem", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                {serverHealth.active ? (
+                  <span className="pill" style={{ background: "var(--primary)", borderColor: "var(--primary)", color: "#fff" }}>
+                    Active
+                  </span>
+                ) : (
+                  <span className="pill" style={{ color: "var(--danger)" }}>
+                    Degraded — database unreachable
+                  </span>
+                )}
+                <span className="text-faint">up {formatUptime(serverHealth.uptimeSeconds)}</span>
+              </div>
+              {serverHealth.lastDowntimeAt && (
+                <span className="text-faint">
+                  {formatUptime(secondsSince(serverHealth.lastDowntimeAt))} since last downtime
+                </span>
+              )}
+            </div>
+
+            {serverHealth.disk && (
+              <DiskUsageMeter
+                totalBytes={serverHealth.disk.totalBytes}
+                usedBytes={serverHealth.disk.usedBytes}
+                instanceBytes={serverHealth.usedByInstanceBytes ?? 0}
+              />
+            )}
+
+            <p className="text-faint" style={{ margin: 0, fontSize: "0.85rem" }}>
+              Database {formatBytes(serverHealth.database.sizeBytes)} · Uploads{" "}
+              {formatBytes(serverHealth.uploads.sizeBytes)}
+            </p>
           </div>
         )}
       </div>
@@ -772,11 +889,24 @@ export default function AdminPage() {
 
       <h2 style={{ marginTop: "1.5rem" }}>Explore servers</h2>
       <p className="text-faint">
-        Servers users can browse trending/public posts from under Explore — a live read of each
-        server's own public Mastodon-API-compatible REST endpoint, not federation. Only works for
-        Mastodon (or API-compatible forks); other software won't return anything.
+        Servers users can browse trending/public content from under Explore — a live read of each
+        server's own real public API, not federation. Mastodon, Pleroma/Akkoma, Misskey, Lemmy,
+        PeerTube, Loops, Ghost, and Mobilizon all work with plain &quot;Add server&quot;. Pixelfed and
+        Friendica lock their public API behind a login — use &quot;Connect via OAuth&quot; for those
+        instead, which sends you to that server to log in and authorize Gibrr. Funkwhale works the
+        same way as the rest, but its own strict signature checks mean it needs this instance to be
+        reachable from the public internet — it won&apos;t succeed from a local/offline dev setup.
+        A few platforms can&apos;t be added at all: Threads and BookWyrm expose no usable public API,
+        and Diaspora doesn&apos;t speak ActivityPub.
       </p>
       <div className="card">
+        {exploreOauthNotice && (
+          <p className={exploreOauthNotice.success ? "text-dim" : "error-text"} style={{ marginTop: 0 }}>
+            {exploreOauthNotice.success
+              ? `Connected to ${exploreOauthNotice.domain ?? "that server"}.`
+              : `Could not connect to ${exploreOauthNotice.domain ?? "that server"} — the authorization didn't complete.`}
+          </p>
+        )}
         <form
           onSubmit={handleAddExploreServer}
           style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}
@@ -797,6 +927,14 @@ export default function AdminPage() {
           />
           <button type="submit" className="btn btn-primary" disabled={addingExploreServer}>
             {addingExploreServer ? "…" : "Add server"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={connectingExploreOAuth}
+            onClick={handleConnectExploreServerOAuth}
+          >
+            {connectingExploreOAuth ? "…" : "Connect via OAuth"}
           </button>
         </form>
         {exploreServerError && <p className="error-text">{exploreServerError}</p>}
@@ -822,7 +960,10 @@ export default function AdminPage() {
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <strong>{server.name || server.domain}</strong>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <strong>{server.name || server.domain}</strong>
+                    {server.connected && <span className="pill">OAuth connected</span>}
+                  </div>
                   {server.name && (
                     <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
                       {server.domain}
@@ -999,6 +1140,6 @@ export default function AdminPage() {
           </div>
         )}
       </div>
-    </main>
+    </>
   );
 }

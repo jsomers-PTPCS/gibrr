@@ -107,6 +107,22 @@ familyRouter.get("/family/requests", requireAuth, async (req, res) => {
   );
 });
 
+// GET /family/requests/sent -> caller's own pending outgoing links — the
+// other half of the picture GET /family/requests only shows the incoming
+// side of. relationType is returned as-is (from the caller's own point
+// of view, same as it was submitted) since the caller is actorId here,
+// not relativeId — no inversion needed, unlike GET /family/:username.
+familyRouter.get("/family/requests/sent", requireAuth, async (req, res) => {
+  const requests = await prisma.familyLink.findMany({
+    where: { actorId: req.actor!.id, state: "pending" },
+    include: { relative: { select: ACTOR_SUMMARY_SELECT } },
+    orderBy: { createdAt: "desc" },
+  });
+  res.json(
+    requests.map((r) => ({ id: r.id, relationType: r.relationType, actor: r.relative })),
+  );
+});
+
 // GET /family/:username -> that actor's accepted family links, mapped to
 // the viewer-appropriate direction (the inverse relation type is shown
 // when the link's relativeId is the profile being viewed rather than

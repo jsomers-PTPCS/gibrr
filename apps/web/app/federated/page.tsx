@@ -12,6 +12,8 @@ import { PostItem } from "../../components/PostItem";
 // to your own follows/circles/explore subscriptions.
 export default function FederatedPage() {
   const [posts, setPosts] = useState<Post[] | "loading" | "error">("loading");
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [domains, setDomains] = useState<string[]>([]);
   const [domain, setDomain] = useState("");
   const [q, setQ] = useState("");
@@ -34,9 +36,24 @@ export default function FederatedPage() {
   useEffect(() => {
     setPosts("loading");
     getFeed(undefined, "federated", { domain: domain || undefined, q: appliedQ || undefined })
-      .then((res) => setPosts(res.posts))
+      .then((res) => {
+        setPosts(res.posts);
+        setNextCursor(res.nextCursor);
+      })
       .catch(() => setPosts("error"));
   }, [domain, appliedQ]);
+
+  async function handleLoadMore() {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const res = await getFeed(nextCursor, "federated", { domain: domain || undefined, q: appliedQ || undefined });
+      setPosts((prev) => (Array.isArray(prev) ? [...prev, ...res.posts] : prev));
+      setNextCursor(res.nextCursor);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   return (
     <main className="page">
@@ -85,6 +102,17 @@ export default function FederatedPage() {
             <PostItem key={post.id} post={post} />
           ))}
         </ul>
+      )}
+
+      {Array.isArray(posts) && nextCursor && (
+        <button
+          className="btn btn-ghost"
+          onClick={handleLoadMore}
+          disabled={loadingMore}
+          style={{ display: "block", margin: "1rem auto" }}
+        >
+          {loadingMore ? "Loading…" : "See more"}
+        </button>
       )}
     </main>
   );

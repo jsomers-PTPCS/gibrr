@@ -61,6 +61,16 @@ searchRouter.get("/search", optionalAuth, async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (!q) return res.json({ posts: [], actors: [], groups: [] });
 
+  // People search accepts a leading "@" the way typing an actual handle
+  // (@alice) naturally would, and ignores it — a literal "@" is never
+  // part of anyone's stored username/displayName/domain, so leaving it
+  // in would silently return zero matches instead of finding the person
+  // the "@" was clearly meant to reference. Left alone for the post/
+  // group search below: those match arbitrary text content, where an
+  // "@" could be a real, intentional part of what's being searched for
+  // (e.g. finding a post that mentions "@alice").
+  const personQuery = q.startsWith("@") ? q.slice(1) : q;
+
   const viewerId = req.actor?.id;
   const blockedIds = await blockedActorIds(viewerId);
   const visibility = await postVisibilityWhere(viewerId);
@@ -104,9 +114,9 @@ searchRouter.get("/search", optionalAuth, async (req, res) => {
       where: {
         type: "Person",
         OR: [
-          { username: { contains: q, mode: "insensitive" } },
-          { displayName: { contains: q, mode: "insensitive" } },
-          { domain: { contains: q, mode: "insensitive" } },
+          { username: { contains: personQuery, mode: "insensitive" } },
+          { displayName: { contains: personQuery, mode: "insensitive" } },
+          { domain: { contains: personQuery, mode: "insensitive" } },
         ],
       },
       take: SEARCH_LIMIT,

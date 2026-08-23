@@ -17,6 +17,7 @@ import {
   type CalendarEvent,
 } from "../../../lib/api";
 import { ProfileMemoBox } from "../../../components/ProfileMemoBox";
+import { RenderedDescription } from "../../../components/RenderedDescription";
 import { PostItem } from "../../../components/PostItem";
 import { Avatar } from "../../../components/Avatar";
 import { EventsCalendar } from "../../../components/EventsCalendar";
@@ -26,6 +27,8 @@ import { BlockButton } from "../../../components/BlockButton";
 import { ReportButton } from "../../../components/ReportButton";
 import { RelationshipsTab } from "../../../components/RelationshipsTab";
 import { PhotosTab } from "../../../components/PhotosTab";
+import { BookwyrmTab } from "../../../components/BookwyrmTab";
+import { KeepsTab } from "../../../components/KeepsTab";
 import { FONT_PRESETS } from "../../../lib/fontPresets";
 import { HEADER_PRESETS, BACKGROUND_PRESETS, AVATAR_PRESETS } from "../../../lib/imagePresets";
 import { ABOUT_FIELD_LABELS, CALENDAR_VISIBILITY_LABEL } from "../../../lib/aboutFields";
@@ -51,8 +54,17 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<Profile | "loading" | "error">("loading");
   const [me, setMe] = useState<Me | null>(null);
   const [tab, setTab] = useState<
-    "posts" | "comments" | "about" | "calendar" | "relationships" | "photos"
+    "posts" | "comments" | "about" | "calendar" | "relationships" | "photos" | "bookwyrm" | "keeps"
   >("posts");
+
+  // Lets a `?tab=bookwyrm` link (e.g. the BookWyrm badge next to a
+  // friend's name on the Relationships tab) land directly on that tab, without
+  // pulling in useSearchParams/a Suspense boundary just for this one
+  // deep-link — window is only ever touched after mount here.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested === "bookwyrm") setTab("bookwyrm");
+  }, []);
   const [messaging, setMessaging] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [events, setEvents] = useState<CalendarEvent[] | "loading" | "hidden" | "unavailable">(
@@ -72,6 +84,28 @@ export default function ProfilePage() {
     return getProfile(username)
       .then(setProfile)
       .catch(() => setProfile("error"));
+  }
+
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+
+  async function handleLoadMorePosts() {
+    if (profile === "loading" || profile === "error" || !profile.nextCursor) return;
+    setLoadingMorePosts(true);
+    try {
+      const res = await getProfile(username, profile.nextCursor);
+      // Only posts/nextCursor come from the paginated page — everything
+      // else in the response (actor, counts, comments, memo) is just
+      // whatever's currently true, not specific to this page of posts,
+      // so merging the rest in would silently clobber anything already
+      // changed locally (e.g. a just-written memo) with a stale refetch.
+      setProfile((prev) =>
+        prev !== "loading" && prev !== "error"
+          ? { ...prev, posts: [...prev.posts, ...res.posts], nextCursor: res.nextCursor }
+          : prev,
+      );
+    } finally {
+      setLoadingMorePosts(false);
+    }
   }
 
   async function handleAvatarFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -290,7 +324,7 @@ export default function ProfilePage() {
                 alt={displayLabel}
                 width={128}
                 height={128}
-                style={{ borderRadius: "50%", objectFit: "cover", display: "block" }}
+                style={{ width: 128, height: 128, borderRadius: "50%", objectFit: "cover", display: "block" }}
               />
             ) : (
               <Avatar name={displayLabel} size={128} />
@@ -331,9 +365,6 @@ export default function ProfilePage() {
           </div>
           {isOwnProfile && (
             <div style={{ display: "flex", gap: "0.5rem", paddingTop: "0.6rem" }}>
-              <Link href={`/u/${username}/edit`} className="btn btn-ghost">
-                Edit profile
-              </Link>
               <Link href="/settings" className="btn btn-ghost">
                 Settings
               </Link>
@@ -343,14 +374,16 @@ export default function ProfilePage() {
             </div>
           )}
           {me && !isOwnProfile && (
-            <div style={{ display: "flex", gap: "0.5rem", paddingTop: "0.6rem" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", paddingTop: "0.6rem" }}>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                <FriendButton username={username} />
+                <FollowButton username={username} domain={profile.actor.domain} actorId={profile.actor.id} />
+                <BlockButton username={username} domain={profile.actor.domain} actorId={profile.actor.id} />
+                <ReportButton targetType="actor" targetId={profile.actor.id} />
+              </div>
               <button onClick={handleMessage} disabled={messaging} className="btn btn-accent">
                 {messaging ? "…" : "Whisper"}
               </button>
-              <FriendButton username={username} />
-              <FollowButton username={username} domain={profile.actor.domain} actorId={profile.actor.id} />
-              <BlockButton username={username} domain={profile.actor.domain} actorId={profile.actor.id} />
-              <ReportButton targetType="actor" targetId={profile.actor.id} />
             </div>
           )}
         </div>
@@ -395,6 +428,19 @@ export default function ProfilePage() {
           <button className={tab === "photos" ? "active" : undefined} onClick={() => setTab("photos")}>
             Photos
           </button>
+          {isOwnProfile && (
+            <button className={tab === "keeps" ? "active" : undefined} onClick={() => setTab("keeps")}>
+              Keeps
+            </button>
+          )}
+          {profile.actor.bookwyrmHandle && (
+            <button
+              className={tab === "bookwyrm" ? "active" : undefined}
+              onClick={() => setTab("bookwyrm")}
+            >
+              BookWyrm
+            </button>
+          )}
         </nav>
       </div>
 
@@ -403,9 +449,13 @@ export default function ProfilePage() {
         <aside style={{ flex: "1 1 280px", maxWidth: 320 }}>
           <div className="card" style={boxStyle(profile.actor.introBoxColor, "card", theme, profile.actor.fontColor)}>
             <h3 style={{ marginTop: 0, fontSize: "1.05rem" }}>Intro</h3>
-            <p style={{ margin: 0 }}>
-              {profile.actor.summary || <span className="text-faint">No bio yet.</span>}
-            </p>
+            {profile.actor.summary ? (
+              <RenderedDescription html={profile.actor.summary} style={{ margin: 0 }} />
+            ) : (
+              <p style={{ margin: 0 }}>
+                <span className="text-faint">No bio yet.</span>
+              </p>
+            )}
             <ul className="intro-list">
               {profile.actor.location && <li>📍 {profile.actor.location}</li>}
               {profile.actor.website && (
@@ -430,11 +480,23 @@ export default function ProfilePage() {
             (profile.posts.length === 0 ? (
               <p className="text-dim">No Gibs yet.</p>
             ) : (
-              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                {profile.posts.map((post) => (
-                  <PostItem key={post.id} post={post} boxStyle={contentBoxStyle} />
-                ))}
-              </ul>
+              <>
+                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                  {profile.posts.map((post) => (
+                    <PostItem key={post.id} post={post} boxStyle={contentBoxStyle} />
+                  ))}
+                </ul>
+                {profile.nextCursor && (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={handleLoadMorePosts}
+                    disabled={loadingMorePosts}
+                    style={{ display: "block", margin: "1rem auto" }}
+                  >
+                    {loadingMorePosts ? "Loading…" : "See more"}
+                  </button>
+                )}
+              </>
             ))}
 
           {tab === "comments" &&
@@ -489,6 +551,16 @@ export default function ProfilePage() {
 
           {tab === "photos" && (
             <PhotosTab username={username} isOwnProfile={isOwnProfile} contentBoxStyle={contentBoxStyle} />
+          )}
+
+          {tab === "keeps" && isOwnProfile && <KeepsTab contentBoxStyle={contentBoxStyle} />}
+
+          {tab === "bookwyrm" && (
+            <BookwyrmTab
+              username={username}
+              displayName={profile.actor.displayName ?? profile.actor.username}
+              contentBoxStyle={contentBoxStyle}
+            />
           )}
 
           {tab === "about" && (
