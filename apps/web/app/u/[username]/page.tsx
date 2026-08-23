@@ -90,14 +90,19 @@ export default function ProfilePage() {
   // corners) that would otherwise clip the dropdown — so its position
   // is computed from the trigger button's rect instead of plain CSS.
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
-  const [tabMenuPos, setTabMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [tabMenuPos, setTabMenuPos] = useState<{ top: number; right: number } | null>(null);
   const tabMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const tabMenuDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!tabMenuOpen) return;
     const rect = tabMenuTriggerRef.current?.getBoundingClientRect();
-    if (rect) setTabMenuPos({ top: rect.bottom + 4, left: rect.left });
+    // Pinned to a fixed inset from the screen's right edge rather than
+    // the trigger's own position — the trigger sits near the *left* of
+    // the header (where the tab strip always started), so anchoring the
+    // dropdown to its rect kept pulling the menu toward the left edge
+    // (or, anchored to the trigger's right edge, straight off-screen).
+    if (rect) setTabMenuPos({ top: rect.bottom + 4, right: 16 });
   }, [tabMenuOpen]);
 
   useEffect(() => {
@@ -340,7 +345,6 @@ export default function ProfilePage() {
         <div
           className="profile-header-row"
           style={{
-            padding: "0 1.5rem 1rem",
             display: "flex",
             alignItems: "flex-start",
             gap: "1.25rem",
@@ -351,11 +355,7 @@ export default function ProfilePage() {
               not on the row) — the row itself starts right at the header's
               bottom edge, so however many lines the name/handle wrap to on
               a narrow screen, they only ever grow downward and can't climb
-              back up over the header. On mobile, .profile-avatar-wrap takes
-              the full row width (see globals.css), putting the avatar on
-              its own line so the name and Settings/Log out have the whole
-              width to share on the line below instead of competing with a
-              128px avatar for space. */}
+              back up over the header. */}
           <div
             className={`profile-avatar-wrap${isOwnProfile ? " profile-image-editable" : ""}`}
             style={{
@@ -403,6 +403,13 @@ export default function ProfilePage() {
               </>
             )}
           </div>
+          {/* Forces a wrap onto a new line on mobile without touching the
+              avatar's own box (giving the avatar itself flex-basis: 100%
+              stretched its width to the full row while its height stayed
+              content-sized, so border-radius: 50% drew an oval instead of
+              a circle). Zero-sized, so it's invisible on desktop where it
+              doesn't force anything. */}
+          <div className="profile-row-break" />
           <div className="profile-name-block" style={{ flex: 1, paddingTop: "0.6rem" }}>
             <h1 style={{ margin: 0, fontSize: "1.7rem" }}>
               {displayLabel}
@@ -491,7 +498,7 @@ export default function ProfilePage() {
               <div
                 ref={tabMenuDropdownRef}
                 className="card tab-menu-dropdown"
-                style={{ position: "fixed", top: tabMenuPos.top, left: tabMenuPos.left }}
+                style={{ position: "fixed", top: tabMenuPos.top, right: tabMenuPos.right }}
               >
                 {tabItems.map((item) => (
                   <button

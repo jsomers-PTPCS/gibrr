@@ -146,12 +146,18 @@ button {
   margin-bottom: 1rem;
 }
 
-/* Base (desktop) width for the profile page's name/handle block — kept
-   as a real CSS rule rather than inline so the mobile override below
-   can actually win the cascade (an inline style always beats a
-   stylesheet rule, media query or not). */
+/* Base (desktop) sizing for the profile page's name/handle block and
+   header row — kept as real CSS rules rather than inline so the mobile
+   overrides below can actually win the cascade (an inline style always
+   beats a stylesheet rule, media query or not). */
 .profile-name-block {
   min-width: 200px;
+}
+.profile-header-row {
+  padding: 0 1.5rem 1rem;
+}
+.profile-row-break {
+  display: none;
 }
 
 /* Less wasted horizontal space around post cards on a phone screen —
@@ -191,14 +197,22 @@ button {
   /* Profile header row: avatar + name-block + Settings/Log out normally
      share one flex row, but the 128px avatar alone eats most of a
      phone's width, pushing Settings/Log out onto their own line below
-     the name instead of beside it. Giving the avatar the full row width
-     puts it on its own line, freeing the line below for the name and
-     buttons to actually sit side by side. */
+     the name instead of beside it. .profile-row-break forces the wrap
+     onto a new line after the avatar (giving the avatar itself
+     flex-basis: 100% instead stretched its box wide while its height
+     stayed content-sized, turning its border-radius: 50% circle into an
+     oval), freeing the line below for the name and buttons to sit side
+     by side. Bottom padding is trimmed too, so the tab menu sits right
+     under the name/handle instead of leaving a desktop-sized gap. */
   .profile-header-row {
     row-gap: 0.5rem;
+    padding-bottom: 0.25rem;
   }
-  .profile-avatar-wrap {
+  .profile-row-break {
+    display: block;
     flex-basis: 100%;
+    width: 0;
+    height: 0;
   }
   .profile-name-block {
     min-width: 0;
