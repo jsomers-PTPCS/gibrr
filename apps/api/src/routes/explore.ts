@@ -9,7 +9,14 @@ import { mapWithConcurrency } from "../federation/concurrency.js";
 import { fetchGhostTimeline } from "../federation/ghostExplore.js";
 import { resolveAndCacheRemotePost } from "../federation/remotePost.js";
 import { postInclude, withCommentCount } from "./posts.js";
-import { attachPostVotes, attachCalendarSaves, attachReactions, attachPolls, attachBookmarked } from "../votes.js";
+import {
+  attachPostVotes,
+  attachCalendarSaves,
+  attachBoosted,
+  attachReactions,
+  attachPolls,
+  attachBookmarked,
+} from "../votes.js";
 
 export const exploreRouter = Router();
 
@@ -56,8 +63,26 @@ async function findServersBySoftware(software: string) {
 // last sweep (5 minutes by default), not live-checked per request —
 // the same tradeoff Explore's own feed already makes.
 exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
+  // "new" (default, createdAt desc — unchanged from before this param
+  // existed) plus two sorts the cache already has real data for at no
+  // extra query cost: each ExploreCachedPost row already carries the
+  // origin server's own like/comment totals as of the last sweep (see
+  // that model's own schema comment), so ranking by them is just an
+  // in-memory sort of what was already being fetched, not a second
+  // round trip anywhere.
+  const sort = req.query.sort === "likes" || req.query.sort === "comments" ? req.query.sort : "new";
+  // "Show only these" allow-list, same shape/semantics as Home/
+  // Federated's own server filter (FeedFilterBar.tsx) — empty means no
+  // narrowing, same as today.
+  const domainFilter =
+    typeof req.query.domain === "string"
+      ? req.query.domain.split(",").map((d) => d.trim()).filter(Boolean)
+      : [];
+
   const cached = await prisma.exploreCachedPost.findMany({
-    where: { server: { software: "Loops" } },
+    where: {
+      server: { software: "Loops", ...(domainFilter.length > 0 ? { domain: { in: domainFilter } } : {}) },
+    },
     select: { postId: true, remoteLikes: true, remoteComments: true },
   });
   if (cached.length === 0) return res.json({ posts: [] });
@@ -81,7 +106,8 @@ exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
 
   const postsWithVotes = await attachPostVotes(posts, req.actor!.id);
   const postsWithSaves = await attachCalendarSaves(postsWithVotes, req.actor!.id);
-  const postsWithReactions = await attachReactions(postsWithSaves, req.actor!.id);
+  const postsWithBoosted = await attachBoosted(postsWithSaves, req.actor!.id);
+  const postsWithReactions = await attachReactions(postsWithBoosted, req.actor!.id);
   const postsWithPolls = await attachPolls(postsWithReactions, req.actor!.id);
   const postsWithBookmarks = await attachBookmarked(postsWithPolls, req.actor!.id);
 
@@ -94,13 +120,36 @@ exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
   // replaces score with the fresh *local-only* count from POST
   // /posts/:id/vote — can't stomp the baseline back down to near-zero;
   // the frontend always displays remoteEngagement + the local number.
-  res.json({
-    posts: postsWithBookmarks.map(withCommentCount).map((post) => {
-      const remote = remoteCountsByPostId.get(post.id);
-      if (!remote) return post;
-      return { ...post, remoteEngagement: { likes: remote.likes, shares: null, comments: remote.comments } };
-    }),
+  const resultPosts = postsWithBookmarks.map(withCommentCount).map((post) => {
+    const remote = remoteCountsByPostId.get(post.id);
+    return {
+      ...post,
+      remoteEngagement: remote ? { likes: remote.likes, shares: null, comments: remote.comments } : null,
+    };
   });
+
+  if (sort === "likes") {
+    resultPosts.sort((a, b) => (b.remoteEngagement?.likes ?? 0) - (a.remoteEngagement?.likes ?? 0));
+  } else if (sort === "comments") {
+    resultPosts.sort((a, b) => (b.remoteEngagement?.comments ?? 0) - (a.remoteEngagement?.comments ?? 0));
+  }
+
+  res.json({ posts: resultPosts });
+});
+
+// GET /explore/loops/servers -> every Loops-tagged server's domain —
+// populates the server filter in the Loops page's own filter drawer
+// (apps/web/app/loops/page.tsx). Every Loops server, not just ones with
+// currently-cached content, unlike deriving this list from whatever's
+// on screen — a server the sweep hasn't reached yet (or that's
+// temporarily empty) should still be choosable to filter down to.
+exploreRouter.get("/explore/loops/servers", requireAuth, async (_req, res) => {
+  const servers = await prisma.exploreServer.findMany({
+    where: { software: "Loops" },
+    select: { domain: true },
+    orderBy: { domain: "asc" },
+  });
+  res.json(servers.map((s) => s.domain));
 });
 
 // GET /explore/longform/feed -> a live, aggregated article feed across

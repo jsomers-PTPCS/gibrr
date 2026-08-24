@@ -7,6 +7,7 @@ import Link from "next/link";
 import {
   getMe,
   getProfile,
+  getEchoes,
   startConversation,
   logout,
   getUpcomingEvents,
@@ -16,6 +17,7 @@ import {
   type Me,
   type Profile,
   type CalendarEvent,
+  type Post,
 } from "../../../lib/api";
 import { ProfileMemoBox } from "../../../components/ProfileMemoBox";
 import { RenderedDescription } from "../../../components/RenderedDescription";
@@ -55,7 +57,7 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<Profile | "loading" | "error">("loading");
   const [me, setMe] = useState<Me | null>(null);
   const [tab, setTab] = useState<
-    "posts" | "comments" | "about" | "calendar" | "relationships" | "photos" | "bookwyrm" | "keeps"
+    "posts" | "comments" | "echoes" | "about" | "calendar" | "relationships" | "photos" | "bookwyrm" | "keeps"
   >("posts");
 
   // Lets a `?tab=bookwyrm` link (e.g. the BookWyrm badge next to a
@@ -83,6 +85,14 @@ export default function ProfilePage() {
   const [events, setEvents] = useState<CalendarEvent[] | "loading" | "hidden" | "unavailable">(
     "hidden",
   );
+  // Same lazy "fetch once the tab is actually opened" shape as Calendar
+  // just above — echoes live behind their own endpoint (GET
+  // /profile/:username/echoes), not bundled into the main getProfile
+  // response every profile view pays for regardless of whether anyone
+  // opens this tab.
+  const [echoes, setEchoes] = useState<Post[] | "loading" | "hidden">("hidden");
+  const [echoesNextCursor, setEchoesNextCursor] = useState<string | null>(null);
+  const [loadingMoreEchoes, setLoadingMoreEchoes] = useState(false);
 
   // Clicking the avatar/header image itself (own profile only) opens
   // the file picker directly, rather than requiring a trip to the
@@ -221,7 +231,31 @@ export default function ProfilePage() {
       .then(setMe)
       .catch(() => setMe(null));
     setEvents("hidden");
+    setEchoes("hidden");
   }, [username, domain]);
+
+  useEffect(() => {
+    if (tab !== "echoes" || echoes !== "hidden") return;
+    setEchoes("loading");
+    getEchoes(username, undefined, domain ?? undefined)
+      .then((res) => {
+        setEchoes(res.posts);
+        setEchoesNextCursor(res.nextCursor);
+      })
+      .catch(() => setEchoes([]));
+  }, [tab, echoes, username, domain]);
+
+  async function handleLoadMoreEchoes() {
+    if (!echoesNextCursor) return;
+    setLoadingMoreEchoes(true);
+    try {
+      const res = await getEchoes(username, echoesNextCursor, domain ?? undefined);
+      setEchoes((prev) => (Array.isArray(prev) ? [...prev, ...res.posts] : prev));
+      setEchoesNextCursor(res.nextCursor);
+    } finally {
+      setLoadingMoreEchoes(false);
+    }
+  }
 
   useEffect(() => {
     if (tab !== "calendar" || events !== "hidden") return;
@@ -249,6 +283,7 @@ export default function ProfilePage() {
   const tabItems: { key: typeof tab; label: string }[] = [
     { key: "posts", label: "Gibs" },
     { key: "comments", label: "Chatter" },
+    { key: "echoes", label: "Echoes" },
     { key: "about", label: "About" },
     { key: "calendar", label: "Calendar" },
     { key: "relationships", label: "Relationships" },
@@ -638,6 +673,34 @@ export default function ProfilePage() {
                 ))}
               </ul>
             ))}
+
+          {tab === "echoes" && (
+            <>
+              {echoes === "loading" && <p className="text-dim">Loading…</p>}
+              {Array.isArray(echoes) && echoes.length === 0 && (
+                <p className="text-dim">No echoes yet.</p>
+              )}
+              {Array.isArray(echoes) && echoes.length > 0 && (
+                <>
+                  <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                    {echoes.map((post) => (
+                      <PostItem key={post.id} post={post} boxStyle={contentBoxStyle} />
+                    ))}
+                  </ul>
+                  {echoesNextCursor && (
+                    <button
+                      className="btn btn-ghost"
+                      onClick={handleLoadMoreEchoes}
+                      disabled={loadingMoreEchoes}
+                      style={{ display: "block", margin: "1rem auto" }}
+                    >
+                      {loadingMoreEchoes ? "Loading…" : "See more"}
+                    </button>
+                  )}
+                </>
+              )}
+            </>
+          )}
 
           {tab === "calendar" && (
             <div className="card" style={contentBoxStyle}>

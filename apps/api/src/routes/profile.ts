@@ -26,6 +26,7 @@ import {
   attachPostVotes,
   attachCommentVotes,
   attachCalendarSaves,
+  attachBoosted,
   attachReactions,
   attachPolls,
   attachBookmarked,
@@ -141,6 +142,57 @@ profileRouter.get("/profile/:username", optionalAuth, async (req, res) => {
     nextCursor,
     comments: commentsWithVotes,
     memo: memo?.body ?? null,
+  });
+});
+
+// GET /profile/:username/echoes[?domain=&cursor=] -> posts this actor
+// has boosted, most recently echoed first. A boost is real, federated,
+// public activity (an Announce, same as anyone else's) — unlike Keeps
+// (a private save) or Calendar (opt-in visibility), so this is shown
+// for any profile the same way Posts/Comments already are, not gated
+// to the profile owner viewing their own. Actor resolution duplicates
+// the main handler's own remote-discovery fallback just above rather
+// than sharing it — that handler is the one thing on this page every
+// visit depends on; a small, self-contained duplicate here is a
+// smaller risk than refactoring it out from under that already-tested
+// path for one more, optional tab.
+profileRouter.get("/profile/:username/echoes", optionalAuth, async (req, res) => {
+  const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+  const domain = typeof req.query.domain === "string" ? req.query.domain : undefined;
+
+  let actor = domain
+    ? await prisma.actor.findUnique({ where: { username_domain: { username: req.params.username, domain } } })
+    : await prisma.actor.findFirst({ where: { username: req.params.username } });
+
+  if (!actor && domain && domain !== localDomain()) {
+    const remote = await discoverActor(`${req.params.username}@${domain}`, req.actor ?? undefined);
+    if (remote) actor = await upsertRemoteActor(remote);
+  }
+
+  if (!actor) return res.status(404).json({ error: "not found" });
+
+  const visibility = await postVisibilityWhere(req.actor?.id);
+  const boosts = await prisma.postBoost.findMany({
+    where: { actorId: actor.id, post: visibility },
+    take: FEED_PAGE_SIZE,
+    ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+    orderBy: { createdAt: "desc" },
+    include: { post: { include: postInclude } },
+  });
+
+  const nextCursor = boosts.length === FEED_PAGE_SIZE ? boosts[boosts.length - 1].id : null;
+  const posts = boosts.map((b) => b.post);
+
+  const postsWithVotes = await attachPostVotes(posts, req.actor?.id);
+  const postsWithSaves = await attachCalendarSaves(postsWithVotes, req.actor?.id);
+  const postsWithBoosted = await attachBoosted(postsWithSaves, req.actor?.id);
+  const postsWithReactions = await attachReactions(postsWithBoosted, req.actor?.id);
+  const postsWithPolls = await attachPolls(postsWithReactions, req.actor?.id);
+  const postsWithBookmarks = await attachBookmarked(postsWithPolls, req.actor?.id);
+
+  res.json({
+    posts: postsWithBookmarks.map(withCommentCount),
+    nextCursor,
   });
 });
 

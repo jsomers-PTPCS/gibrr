@@ -727,6 +727,20 @@ export function getProfile(username: string, cursor?: string, domain?: string) {
   return apiFetch<Profile>(`/profile/${encodeURIComponent(username)}${query}`);
 }
 
+// Posts this actor has boosted, most recently echoed first — separate
+// from the main getProfile fetch (lazily called only once the Echoes
+// tab is actually opened) rather than bundled into Profile itself, same
+// "fetch on demand" shape Keeps/Calendar's own tabs already use here.
+export function getEchoes(username: string, cursor?: string, domain?: string) {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  if (domain) params.set("domain", domain);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<{ posts: Post[]; nextCursor: string | null }>(
+    `/profile/${encodeURIComponent(username)}/echoes${query}`,
+  );
+}
+
 // A private sticky note about this profile, visible only to whoever
 // wrote it — Misskey's "memo." Never federated, see the ProfileMemo
 // model's own comment.
@@ -1535,8 +1549,20 @@ export function getExploreTimeline(domain: string) {
 // scrollable view. Each item is a real, already-resolved Post (full
 // vote/boost/bookmark state included), not a raw preview like
 // getExploreTimeline.
-export function getLoopsFeed() {
-  return apiFetch<{ posts: Post[] }>("/explore/loops/feed");
+export type LoopsSort = "new" | "likes" | "comments";
+
+export function getLoopsFeed(filters?: { sort?: LoopsSort; domains?: string[] }) {
+  const params = new URLSearchParams();
+  if (filters?.sort && filters.sort !== "new") params.set("sort", filters.sort);
+  if (filters?.domains && filters.domains.length > 0) params.set("domain", filters.domains.join(","));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<{ posts: Post[] }>(`/explore/loops/feed${query}`);
+}
+
+// Every Loops-tagged server's domain — populates the Loops page's own
+// filter drawer (LoopsIcon's "⋮" trigger, app/loops/page.tsx).
+export function getLoopsServers() {
+  return apiFetch<string[]>("/explore/loops/servers");
 }
 
 // A live, aggregated long-form article feed across every Host-curated
