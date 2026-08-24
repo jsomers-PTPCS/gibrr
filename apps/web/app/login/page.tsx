@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import Link from "next/link";
 import { login, verifyTwoFactorChallenge, ApiError } from "../../lib/api";
 
 export default function LoginPage() {
@@ -99,9 +98,6 @@ export default function LoginPage() {
           {submitting ? "Logging in…" : "Log in"}
         </button>
         {error && <p className="error-text">{error}</p>}
-        <p className="text-faint" style={{ margin: "0.75rem 0 0", textAlign: "center" }}>
-          <Link href="/forgot-password">Forgot password?</Link>
-        </p>
       </form>
     </main>
   );

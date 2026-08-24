@@ -4,7 +4,7 @@ import { prisma } from "../db.js";
 import { createLocalActor, toPublicActor } from "../federation/localActor.js";
 import { hashPassword } from "../federation/passwords.js";
 import { establishSession } from "../auth/session.js";
-import { authRateLimit, sendVerificationEmail } from "./auth.js";
+import { authRateLimit } from "./auth.js";
 
 export const setupRouter = Router();
 
@@ -51,7 +51,6 @@ setupRouter.post("/setup", authRateLimit, async (req, res) => {
   });
 
   await establishSession(req, res, localUser.id);
-  await sendVerificationEmail(localUser.id, localUser.email);
 
   res.status(201).json({
     actor: toPublicActor(localUser.actor),

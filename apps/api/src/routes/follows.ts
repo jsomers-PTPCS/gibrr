@@ -104,13 +104,16 @@ followsRouter.delete("/follows/:actorId", requireAuth, async (req, res) => {
   res.status(204).end();
 });
 
-// GET /follows/status/:username -> drives the Follow button on a (local)
-// profile page: one of "self" | "none" | "pending" | "accepted". Local
-// only — a remote actor has no profile page in this app to put the button
-// on, so nothing needs to look up status for one.
+// GET /follows/status/:username[?domain=] -> drives the Follow button on
+// a profile page: one of "self" | "none" | "pending" | "accepted".
+// `domain` defaults to ours (the original local-only behavior) — a
+// remote actor's profile page passes their real domain so the button
+// reflects an existing follow/pending state instead of always reading
+// as "none".
 followsRouter.get("/follows/status/:username", optionalAuth, async (req, res) => {
+  const domain = typeof req.query.domain === "string" ? req.query.domain : localDomain();
   const other = await prisma.actor.findFirst({
-    where: { username: req.params.username, domain: localDomain() },
+    where: { username: req.params.username, domain },
   });
   if (!other) return res.status(404).json({ error: "not found" });
 
@@ -140,6 +143,23 @@ followsRouter.get("/follows/status/:username", optionalAuth, async (req, res) =>
 // AP-compliant profile page answers for post URLs already
 // (federation/remotePost.ts) — no webfinger round trip needed since the
 // URL itself is the thing to dereference.
+// Looks up whether the viewer already follows (or has a pending follow
+// on) a username@domain, purely from whatever's already cached locally —
+// a not-yet-cached remote actor trivially can't have a Follow row, so
+// "none" is always correct there without a network round trip.
+async function followStatusFor(
+  viewerId: string,
+  username: string,
+  domain: string,
+): Promise<"none" | "pending" | "accepted"> {
+  const cached = await prisma.actor.findUnique({ where: { username_domain: { username, domain } } });
+  if (!cached) return "none";
+  const follow = await prisma.follow.findUnique({
+    where: { followerId_followingId: { followerId: viewerId, followingId: cached.id } },
+  });
+  return follow?.state ?? "none";
+}
+
 followsRouter.get("/follows/preview", requireAuth, async (req, res) => {
   const urlParam = typeof req.query.url === "string" ? req.query.url : undefined;
   if (urlParam) {
@@ -154,19 +174,18 @@ followsRouter.get("/follows/preview", requireAuth, async (req, res) => {
     }
     const remote = await fetchRemoteActor(urlParam, req.actor!);
     if (!remote || (remote.type && remote.type !== "Person")) return res.status(404).json({ error: "not found" });
+    const username = remote.preferredUsername ?? iri.pathname.split("/").pop() ?? remote.id;
     return res.json({
       id: null,
-      username: remote.preferredUsername ?? iri.pathname.split("/").pop() ?? remote.id,
+      username,
       domain: iri.host,
       displayName: remote.name ?? null,
       avatarImageUrl: null,
       avatarPreset: null,
-      // The actor's own AP object IRI — real fediverse software answers
-      // this same URL with an HTML profile page via content negotiation
-      // when a browser (no Accept: activity+json) requests it, same as
-      // how Post.remoteId already doubles as a real "view original"
-      // link. This is the *only* way to actually browse this person's
-      // posts — there's no in-app profile page for a remote actor.
+      status: await followStatusFor(req.actor!.id, username, iri.host),
+      // The actor's own AP object IRI — kept as a "view original" link
+      // alongside the in-app profile (GET /u/{username}?domain={domain}
+      // on the frontend), not instead of it.
       url: remote.id,
     });
   }
@@ -182,19 +201,23 @@ followsRouter.get("/follows/preview", requireAuth, async (req, res) => {
       select: FOLLOW_SUMMARY_SELECT,
     });
     if (!actor) return res.status(404).json({ error: "not found" });
-    // A local actor already has a real in-app profile page — no
-    // external link needed, see search/page.tsx's use of this field.
-    return res.json({ ...actor, url: null });
+    return res.json({
+      ...actor,
+      url: null,
+      status: await followStatusFor(req.actor!.id, username, domain),
+    });
   }
 
   const remote = await discoverActor(parsed.data, req.actor!);
   if (!remote) return res.status(404).json({ error: "not found" });
 
   const remoteIri = new URL(remote.id);
+  const remoteUsername = remote.preferredUsername ?? remoteIri.pathname.split("/").pop() ?? remote.id;
   res.json({
     id: null,
-    username: remote.preferredUsername ?? remoteIri.pathname.split("/").pop() ?? remote.id,
+    username: remoteUsername,
     domain: remoteIri.host,
+    status: await followStatusFor(req.actor!.id, remoteUsername, remoteIri.host),
     displayName: remote.name ?? null,
     avatarImageUrl: null,
     // See the ?url= branch above's own comment — same "AP object IRI

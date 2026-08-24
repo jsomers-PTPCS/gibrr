@@ -123,6 +123,11 @@ model Actor {
   profileMemosWritten ProfileMemo[] @relation("ProfileMemoAuthor")
   profileMemosAbout   ProfileMemo[] @relation("ProfileMemoSubject")
   exploreSubscriptions ExploreSubscription[]
+  // Set only on the one local pseudo-actor a given RssFeed authors its
+  // cached posts as — see RssFeed's own comment. Never set on a real
+  // person/group actor.
+  rssFeed              RssFeed?
+  rssSubscriptions     RssSubscription[]
 
   conversationParticipants ConversationParticipant[]
   sentMessages             Message[]
@@ -457,6 +462,7 @@ model Post {
   pollOptions   PollOption[]
   bookmarks     Bookmark[]
   exploreCachedIn ExploreCachedPost[]
+  rssCachedIn     RssCachedPost?
 }
 
 // Ordered options for a poll post — `position` preserves the author's
@@ -908,6 +914,23 @@ model ExploreServer {
   domain    String   @unique
   name      String?
   createdAt DateTime @default(now())
+  // "manual" (the Host typed/pasted it into Add server) or "fedidb"
+  // (federation/fedidb.ts's periodic sync added it automatically because
+  // it crossed the configured activity threshold) — lets the Host tell
+  // the two apart in the list, and bulk-remove auto-added ones without
+  // touching servers they picked by hand.
+  source String @default("manual")
+
+  // Cached result of federation/instanceSoftware.ts's nodeinfo lookup,
+  // set once at add-time (manual add, and fedidb.ts's sync) rather than
+  // probed live on every feed request — confirmed live: with the list
+  // at 1600+ servers (most from the FediDB sync), a per-request live
+  // detection fan-out across every server took over 10 seconds (GET
+  // /explore/loops/feed) even with bounded concurrency, and risks
+  // outright timing out as the list keeps growing. Null until backfilled
+  // for rows that predate this column; routes/explore.ts's Loops/
+  // Longform feeds filter on this directly instead of detecting live.
+  software String?
 
   // OAuth2 app-registration + user-token credentials, for servers whose
   // public timeline requires an authenticated request (e.g. Pixelfed
@@ -953,11 +976,76 @@ model ExploreCachedPost {
   serverId     String
   postId       String
   discoveredAt DateTime @default(now())
+  // Populated only by the Loops sweep (federation/loopsSweep.ts) — the
+  // origin server's own real like/comment totals as of that sweep, the
+  // same data loopsExplore.ts's timeline fetch already returns inline
+  // per item (no separate per-post lookup needed to get them). Null for
+  // anything cached via the regular Explore sweep, which has no such
+  // data to record; GET /explore/loops/feed reads these directly
+  // instead of re-fetching live on every request.
+  remoteLikes    Int?
+  remoteComments Int?
 
   server ExploreServer @relation(fields: [serverId], references: [id])
   post   Post          @relation(fields: [postId], references: [id])
 
   @@unique([serverId, postId])
+}
+
+// A subscribed RSS/Atom feed (Reddit's own per-subreddit .rss included —
+// it's really Atom, but rss-parser reads both) — shared across every
+// viewer who listens to the same URL, same "one cached resource, many
+// subscribers" shape as ExploreServer/ExploreSubscription, just
+// self-service (any user can add one, not just the Host) since a feed
+// URL isn't a curation decision the way adding a whole fediverse server
+// to Explore is. Posts can't attribute to nothing (Post.authorActorId
+// is required, and an RSS feed has no ActivityPub actor of its own), so
+// each feed gets one real local pseudo-actor (Service type) created
+// once at subscribe time — see federation/rssFeeds.ts's
+// findOrCreateRssFeed — that its cached items are authored as.
+model RssFeed {
+  id            String    @id @default(uuid())
+  url           String    @unique
+  title         String?
+  actorId       String    @unique
+  createdAt     DateTime  @default(now())
+  lastFetchedAt DateTime?
+
+  actor         Actor             @relation(fields: [actorId], references: [id])
+  subscriptions RssSubscription[]
+  cachedPosts   RssCachedPost[]
+}
+
+// A viewer opting an RssFeed into background polling
+// (federation/rssFeeds.ts's runRssSweep) — same role ExploreSubscription
+// plays for a fediverse server: without this, GET /feed's RSS-cached
+// branch (routes/posts.ts) has nothing to merge in for that viewer.
+model RssSubscription {
+  id        String   @id @default(uuid())
+  actorId   String
+  feedId    String
+  createdAt DateTime @default(now())
+
+  actor Actor   @relation(fields: [actorId], references: [id])
+  feed  RssFeed @relation(fields: [feedId], references: [id])
+
+  @@unique([actorId, feedId])
+}
+
+// One row per (feed, post) the sweep cached from that feed's items —
+// same reasoning as ExploreCachedPost: GET /feed needs to know which
+// feed a cached post came from, to gate it to that feed's subscribers
+// only (postId is unique here, unlike ExploreCachedPost's serverId+postId
+// pair, since an RSS item is only ever fetched from the one feed it
+// belongs to — no cross-feed sharing scenario to dedupe against).
+model RssCachedPost {
+  id           String   @id @default(uuid())
+  feedId       String
+  postId       String   @unique
+  discoveredAt DateTime @default(now())
+
+  feed RssFeed @relation(fields: [feedId], references: [id])
+  post Post    @relation(fields: [postId], references: [id])
 }
 
 // Singleton row (id is always 1 — see heartbeat.ts, which owns every
@@ -973,4 +1061,18 @@ model InstanceHeartbeat {
   id             Int      @id
   lastAliveAt    DateTime
   lastDowntimeAt DateTime
+}
+
+// Singleton row (id is always 1, same convention as InstanceHeartbeat) —
+// the Host's settings for federation/fedidb.ts's periodic sync: pulling
+// in every FediDB-known server whose user_count crosses minUserCount as
+// a new ExploreServer (source: "fedidb"), so the Explore list grows on
+// its own as the fediverse does instead of needing every server typed
+// in by hand. Disabled (enabled: false) by default — this is opt-in,
+// same posture as every other external integration here.
+model FediDbSyncSettings {
+  id           Int       @id
+  enabled      Boolean   @default(false)
+  minUserCount Int       @default(10000)
+  lastSyncAt   DateTime?
 }

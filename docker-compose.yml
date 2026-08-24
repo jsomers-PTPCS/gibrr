@@ -1,3 +1,17 @@
+# Explicit project name — without this, `docker compose` defaults the
+# project name to the current directory's basename, which is "gibrr"
+# here, exactly the same as docker-compose.prod.yml's own default (its
+# install.sh sets `-p gibrr` explicitly, but only because its author
+# assumed this file would default to something else; it doesn't). Two
+# compose files defaulting to the same project name means `docker
+# compose up` from either one can recreate the *other* stack's
+# containers under shared names on a shared network — confirmed live:
+# a plain `docker compose up -d` here once swapped out a running
+# production Postgres container for this file's empty dev one, on the
+# same network the production api/web containers were still attached
+# to. This pins dev to its own namespace so that can't happen again.
+name: gibrr-dev
+
 services:
   postgres:
     image: postgres:16

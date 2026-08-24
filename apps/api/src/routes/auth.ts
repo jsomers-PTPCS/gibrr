@@ -1,11 +1,9 @@
-import crypto from "node:crypto";
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { createLocalActor, toPublicActor } from "../federation/localActor.js";
 import { hashPassword, verifyPassword } from "../federation/passwords.js";
-import { sendEmail } from "../federation/mailer.js";
 import {
   SESSION_COOKIE,
   clearSessionCookie,
@@ -38,24 +36,10 @@ export const authRateLimit = rateLimit({
   message: { error: "too many attempts, try again later" },
 });
 
-const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
-const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const TWO_FACTOR_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 export function webOrigin(): string {
   return process.env.WEB_ORIGIN ?? "http://localhost:3000";
-}
-
-// Exported for routes/setup.ts — same verification-email logic as
-// regular registration.
-export async function sendVerificationEmail(localUserId: string, email: string) {
-  const token = crypto.randomBytes(32).toString("hex");
-  await prisma.localUser.update({
-    where: { id: localUserId },
-    data: { emailVerificationToken: token, emailVerificationExpiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS) },
-  });
-  const link = `${webOrigin()}/verify-email?token=${token}`;
-  await sendEmail(email, "Verify your Gibrr email", `Confirm your email address:\n\n${link}\n\nThis link expires in 24 hours.`);
 }
 
 const registerSchema = z.object({
@@ -93,7 +77,6 @@ authRouter.post("/auth/register", authRateLimit, async (req, res) => {
   });
 
   await establishSession(req, res, localUser.id);
-  await sendVerificationEmail(localUser.id, localUser.email);
 
   res.status(201).json({
     actor: toPublicActor(localUser.actor),
@@ -353,75 +336,3 @@ authRouter.post("/auth/2fa/disable", requireAuth, async (req, res) => {
   res.status(204).end();
 });
 
-const verifyEmailSchema = z.object({ token: z.string().min(1) });
-
-authRouter.post("/auth/verify-email", authRateLimit, async (req, res) => {
-  const parsed = verifyEmailSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "invalid token" });
-
-  const localUser = await prisma.localUser.findUnique({ where: { emailVerificationToken: parsed.data.token } });
-  if (!localUser || !localUser.emailVerificationExpiresAt || localUser.emailVerificationExpiresAt < new Date()) {
-    return res.status(400).json({ error: "invalid or expired token" });
-  }
-
-  await prisma.localUser.update({
-    where: { id: localUser.id },
-    data: { emailVerified: true, emailVerificationToken: null, emailVerificationExpiresAt: null },
-  });
-  res.status(204).end();
-});
-
-authRouter.post("/auth/resend-verification", requireAuth, async (req, res) => {
-  if (req.localUser!.emailVerified) return res.status(204).end();
-  await sendVerificationEmail(req.localUser!.id, req.localUser!.email);
-  res.status(204).end();
-});
-
-const forgotPasswordSchema = z.object({ email: z.string().email() });
-
-authRouter.post("/auth/forgot-password", authRateLimit, async (req, res) => {
-  const parsed = forgotPasswordSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "invalid email" });
-
-  const localUser = await prisma.localUser.findUnique({ where: { email: parsed.data.email } });
-  // Always 200 regardless of whether the account exists — otherwise this
-  // endpoint becomes a way to enumerate registered emails.
-  if (localUser) {
-    const token = crypto.randomBytes(32).toString("hex");
-    await prisma.localUser.update({
-      where: { id: localUser.id },
-      data: { passwordResetToken: token, passwordResetExpiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS) },
-    });
-    const link = `${webOrigin()}/reset-password?token=${token}`;
-    await sendEmail(
-      localUser.email,
-      "Reset your Gibrr password",
-      `Reset your password:\n\n${link}\n\nThis link expires in 1 hour. If you didn't request this, ignore it.`,
-    );
-  }
-  res.status(200).json({ ok: true });
-});
-
-const resetPasswordSchema = z.object({ token: z.string().min(1), password: z.string().min(8) });
-
-authRouter.post("/auth/reset-password", authRateLimit, async (req, res) => {
-  const parsed = resetPasswordSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-
-  const localUser = await prisma.localUser.findUnique({ where: { passwordResetToken: parsed.data.token } });
-  if (!localUser || !localUser.passwordResetExpiresAt || localUser.passwordResetExpiresAt < new Date()) {
-    return res.status(400).json({ error: "invalid or expired token" });
-  }
-
-  const passwordHash = await hashPassword(parsed.data.password);
-  await prisma.$transaction([
-    prisma.localUser.update({
-      where: { id: localUser.id },
-      data: { passwordHash, passwordResetToken: null, passwordResetExpiresAt: null },
-    }),
-    // A credential change invalidates every existing session, local and
-    // otherwise — not just the device the reset happened on.
-    prisma.session.deleteMany({ where: { localUserId: localUser.id } }),
-  ]);
-  res.status(204).end();
-});

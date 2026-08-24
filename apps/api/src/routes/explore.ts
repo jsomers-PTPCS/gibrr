@@ -5,43 +5,130 @@ import { fetchExploreTimelineForDomain } from "../federation/exploreDispatch.js"
 import { sweepServer } from "../federation/exploreSweep.js";
 import { getOrCreateInstanceActor } from "../federation/localActor.js";
 import { fetchInstanceSoftware } from "../federation/instanceSoftware.js";
-import { fetchLoopsTimeline } from "../federation/loopsExplore.js";
+import { mapWithConcurrency } from "../federation/concurrency.js";
+import { fetchGhostTimeline } from "../federation/ghostExplore.js";
 import { resolveAndCacheRemotePost } from "../federation/remotePost.js";
 import { postInclude, withCommentCount } from "./posts.js";
 import { attachPostVotes, attachCalendarSaves, attachReactions, attachPolls, attachBookmarked } from "../votes.js";
 
 export const exploreRouter = Router();
 
-// GET /explore/loops/feed -> a live, aggregated video feed across every
-// Host-curated server detected as Loops software — the TikTok-style
-// scrollable "Loops" subcategory (apps/web/app/loops/page.tsx). Unlike
-// a single server's own GET /explore/:domain/timeline (a raw live
-// preview list with no playable media URL — see mastodonExplore.ts's
-// ExploreStatus, which never carries one), an immersive video feed
-// needs a real videoUrl up front for every item, not just for whichever
-// one a viewer chooses to open — so each status here is resolved+cached
-// the same way clicking "View" already does (idempotent: an
-// already-cached post just returns its existing id, no repeat work).
-exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
-  const servers = await prisma.exploreServer.findMany();
-  const softwareByServer = await Promise.all(
-    servers.map(async (server) => ({ server, software: await fetchInstanceSoftware(server.domain) })),
-  );
-  const loopsServers = softwareByServer
-    .filter((entry) => entry.software === "Loops")
-    .map((entry) => entry.server);
+// How many not-yet-detected ExploreServer rows to probe per feed
+// request — see federation/concurrency.ts's own comment for the
+// slowdown this avoids repeating. ExploreServer.software is set at
+// add-time going forward (both the manual Add-server route and
+// fedidb.ts's sync), so this only ever has work to do for rows that
+// predate that column; capping it keeps one feed request from
+// re-triggering the same slowdown, self-healing the backlog a small
+// batch at a time across however many requests it takes instead.
+const SOFTWARE_BACKFILL_BATCH = 30;
+const SOFTWARE_BACKFILL_CONCURRENCY = 10;
 
-  if (loopsServers.length === 0) return res.json({ posts: [] });
+// Every known ExploreServer already tagged with the given software,
+// plus a small batch of not-yet-tagged ones detected (and persisted)
+// right now — see the constants above for why this is a bounded batch
+// rather than every untagged row at once.
+async function findServersBySoftware(software: string) {
+  const [tagged, untagged] = await Promise.all([
+    prisma.exploreServer.findMany({ where: { software } }),
+    prisma.exploreServer.findMany({ where: { software: null }, take: SOFTWARE_BACKFILL_BATCH }),
+  ]);
+
+  const detected = await mapWithConcurrency(untagged, SOFTWARE_BACKFILL_CONCURRENCY, async (server) => {
+    const detectedSoftware = await fetchInstanceSoftware(server.domain);
+    await prisma.exploreServer.update({ where: { id: server.id }, data: { software: detectedSoftware } });
+    return { server, detectedSoftware };
+  });
+
+  return [...tagged, ...detected.filter((d) => d.detectedSoftware === software).map((d) => d.server)];
+}
+
+// GET /explore/loops/feed -> an aggregated video feed across every
+// Host-curated server detected as Loops software — the TikTok-style
+// scrollable "Loops" subcategory (apps/web/app/loops/page.tsx). Reads
+// from federation/loopsSweep.ts's own periodic cache rather than
+// checking every Loops server live on each request — confirmed live
+// that live version cost 800ms-2s+ per load (bounded by whichever
+// server answered slowest) and hit every Loops server on every single
+// page view; this is a plain DB query instead, same "sweep on a
+// schedule, serve from cache" shape federation/exploreSweep.ts already
+// uses for regular Explore content. Content is only as fresh as the
+// last sweep (5 minutes by default), not live-checked per request —
+// the same tradeoff Explore's own feed already makes.
+exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
+  const cached = await prisma.exploreCachedPost.findMany({
+    where: { server: { software: "Loops" } },
+    select: { postId: true, remoteLikes: true, remoteComments: true },
+  });
+  if (cached.length === 0) return res.json({ posts: [] });
+
+  // Keyed by postId, not by cached row — the same video can in
+  // principle turn up in more than one Loops server's own timeline (a
+  // cross-post, a boost), each with its own cached row.
+  const remoteCountsByPostId = new Map<string, { likes: number | null; comments: number | null }>();
+  for (const entry of cached) {
+    remoteCountsByPostId.set(entry.postId, { likes: entry.remoteLikes, comments: entry.remoteComments });
+  }
+
+  const postIds = [...remoteCountsByPostId.keys()];
+
+  const posts = await prisma.post.findMany({
+    where: { id: { in: postIds }, videoUrl: { not: null } },
+    orderBy: { createdAt: "desc" },
+    include: postInclude,
+    take: 60,
+  });
+
+  const postsWithVotes = await attachPostVotes(posts, req.actor!.id);
+  const postsWithSaves = await attachCalendarSaves(postsWithVotes, req.actor!.id);
+  const postsWithReactions = await attachReactions(postsWithSaves, req.actor!.id);
+  const postsWithPolls = await attachPolls(postsWithReactions, req.actor!.id);
+  const postsWithBookmarks = await attachBookmarked(postsWithPolls, req.actor!.id);
+
+  // A freshly resolved+cached copy's own score/commentCount start at zero
+  // (nobody here has voted/commented on it yet) — showing that instead of
+  // the video's actual popularity on its home server would read as
+  // "0 likes" on something with thousands. Sent as remoteEngagement (the
+  // same field GET /posts/:id uses for a live-fetched single post) rather
+  // than folded into score/commentCount directly, so voting — which
+  // replaces score with the fresh *local-only* count from POST
+  // /posts/:id/vote — can't stomp the baseline back down to near-zero;
+  // the frontend always displays remoteEngagement + the local number.
+  res.json({
+    posts: postsWithBookmarks.map(withCommentCount).map((post) => {
+      const remote = remoteCountsByPostId.get(post.id);
+      if (!remote) return post;
+      return { ...post, remoteEngagement: { likes: remote.likes, shares: null, comments: remote.comments } };
+    }),
+  });
+});
+
+// GET /explore/longform/feed -> a live, aggregated article feed across
+// every Host-curated server detected as Ghost software — the Longform
+// tab on the Federated page (app/federated/page.tsx), kept separate
+// from the ordinary short-post feed since a card built for a blog post
+// (title, excerpt, "read full article" out to the origin) reads
+// completely differently from a Note row. Same "resolve each into a
+// real Post" approach as the Loops feed above, so titles/bodies come
+// from the same cache remotePost.ts already fills in for any other
+// Ghost article (clicking "View" on one, an inbox delivery, etc.) —
+// just aggregated live across every subscribed blog instead of waiting
+// on one. Unlike Loops, there's no remoteCounts to attach: confirmed
+// live (see federation/remoteEngagement.ts) that Ghost's AP objects
+// carry no likes/shares/comments at all, so remoteEngagement is just
+// left unset here, same as any ordinary post.
+exploreRouter.get("/explore/longform/feed", requireAuth, async (req, res) => {
+  const ghostServers = await findServersBySoftware("Ghost");
+
+  if (ghostServers.length === 0) return res.json({ posts: [] });
 
   const instanceActor = await getOrCreateInstanceActor();
   const postIdLists = await Promise.all(
-    loopsServers.map(async (server) => {
-      const statuses = await fetchLoopsTimeline(server.domain, 20);
+    ghostServers.map(async (server) => {
+      const statuses = await fetchGhostTimeline(server.domain, 20);
       if (!statuses) return [];
       const ids = await Promise.all(
-        statuses.map((status) =>
-          resolveAndCacheRemotePost(status.url, instanceActor).catch(() => null),
-        ),
+        statuses.map((status) => resolveAndCacheRemotePost(status.url, instanceActor).catch(() => null)),
       );
       return ids.filter((id): id is string => id !== null);
     }),
@@ -51,7 +138,7 @@ exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
   if (postIds.length === 0) return res.json({ posts: [] });
 
   const posts = await prisma.post.findMany({
-    where: { id: { in: postIds }, videoUrl: { not: null } },
+    where: { id: { in: postIds } },
     orderBy: { createdAt: "desc" },
     include: postInclude,
     take: 60,

@@ -36,7 +36,21 @@ export async function fetchRemoteActor(
 ): Promise<RemoteActorPayload | null> {
   const response = await signedGet(actorIri, signAs);
   if (!response.ok) return null;
-  return (await response.json()) as RemoteActorPayload;
+  try {
+    return (await response.json()) as RemoteActorPayload;
+  } catch (err) {
+    // A 200 doesn't guarantee a real AP JSON body — same non-content-
+    // negotiating-URL case fetchRemoteObject already guards against
+    // (confirmed live: Threads' own human-facing profile pages, e.g.
+    // https://www.threads.com/@someone, return 200 HTML regardless of
+    // Accept, since that's not the real actor IRI — webfinger's "self"
+    // link is). Without this, GET /follows/preview?url=... (pasting a
+    // profile link, rather than typing a handle) 500s the whole request
+    // instead of the graceful "not found" every other bad lookup here
+    // already gets.
+    logger.warn({ err, actorIri }, "remote actor fetch returned a non-JSON body");
+    return null;
+  }
 }
 
 // Generic counterpart to fetchRemoteActor — for dereferencing an

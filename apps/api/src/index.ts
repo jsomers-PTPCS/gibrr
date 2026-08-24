@@ -1,6 +1,9 @@
 import { createApp } from "./app.js";
 import { startDeliveryRetrySweep } from "./federation/deliveryQueue.js";
 import { startExploreSweep } from "./federation/exploreSweep.js";
+import { startLoopsSweep } from "./federation/loopsSweep.js";
+import { startRssSweep } from "./federation/rssFeeds.js";
+import { startFediDbSync } from "./federation/fedidb.js";
 import { recordStartupAndDetectDowntime, startHeartbeat } from "./heartbeat.js";
 import { logger } from "./logger.js";
 
@@ -14,6 +17,9 @@ recordStartupAndDetectDowntime()
       logger.info(`gibrr api listening on :${port}`);
       startDeliveryRetrySweep();
       startExploreSweep();
+      startLoopsSweep();
+      startRssSweep();
+      startFediDbSync();
       startHeartbeat();
     });
   });

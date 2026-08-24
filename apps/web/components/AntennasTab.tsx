@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { getAntennas, createAntenna, deleteAntenna, ApiError, type Antenna } from "../lib/api";
 import { useConfirm } from "./ConfirmDialog";
+import { PageInfo } from "./PageInfo";
 
 // Misskey-style "antennas": saved keyword/author filters, each its own
 // live view of already-visible posts (see app/antennas/[id]/page.tsx,
@@ -73,10 +74,10 @@ export function AntennasTab() {
 
   return (
     <div>
-      <p className="text-dim" style={{ marginTop: 0 }}>
+      <PageInfo title="Antennas" level="h2">
         Saved keyword/author filters — each one is its own live view of posts you can already
         see, matching whatever you set below.
-      </p>
+      </PageInfo>
 
       <form onSubmit={handleCreate} className="card" style={{ display: "grid", gap: "0.6rem", marginBottom: "1.5rem" }}>
         <input

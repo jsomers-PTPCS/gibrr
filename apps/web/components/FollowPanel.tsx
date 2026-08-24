@@ -19,9 +19,6 @@ import { Avatar } from "./Avatar";
 // not window.location.
 const LOCAL_ACTOR_DOMAIN = new URL(API_URL).host;
 
-// A remote actor has no profile page in this app (see the federation
-// plan's scope notes), so a followed/follower row only links out when
-// it's local — everyone else renders as a plain (non-clickable) row.
 function FollowRow({ person }: { person: FollowSummary }) {
   const label = person.displayName ?? person.username;
   const handle = `@${person.username}@${person.domain}`;
@@ -37,17 +34,18 @@ function FollowRow({ person }: { person: FollowSummary }) {
     </>
   );
 
-  if (person.domain === LOCAL_ACTOR_DOMAIN) {
-    return (
-      <Link
-        href={`/u/${person.username}`}
-        style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "inherit" }}
-      >
-        {inner}
-      </Link>
-    );
-  }
-  return <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>{inner}</div>;
+  // domain omitted for a local actor (matches every other same-page
+  // link) — the API's own domain, LOCAL_ACTOR_DOMAIN, isn't the web
+  // origin useful in a URL anyway.
+  const href =
+    person.domain === LOCAL_ACTOR_DOMAIN
+      ? `/u/${person.username}`
+      : `/u/${person.username}?domain=${encodeURIComponent(person.domain)}`;
+  return (
+    <Link href={href} style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "inherit" }}>
+      {inner}
+    </Link>
+  );
 }
 
 export function FollowPanel({

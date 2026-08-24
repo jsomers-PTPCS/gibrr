@@ -32,7 +32,7 @@ import { deletePosts } from "../deletion.js";
 import { extractHashtagTokens, extractMentionTokens } from "../federation/textEntities.js";
 import { resolveMentions } from "../federation/mentions.js";
 import { resolveAndCacheRemotePost } from "../federation/remotePost.js";
-import { syncRemoteReplies, fetchLiveCounts } from "../federation/remoteEngagement.js";
+import { fetchLiveCounts } from "../federation/remoteEngagement.js";
 
 // Whether the viewer is this post's real local author — computed here
 // (not a votes.ts-style batch helper, no query needed: authorActorId
@@ -444,27 +444,99 @@ export const FEED_PAGE_SIZE = 25;
 // cursor. Cleanly paginating a union of independently-cursored sources is
 // real complexity this demo-scale app doesn't need; the first page
 // reliably interleaves everything, later pages may not.
-// GET /feed/federated-domains -> distinct author domains among posts
-// eligible for the federated scope — populates the filter dropdown on
-// the Federated tab. Registered as its own path, not a query param on
-// GET /feed itself, since it's a wholly different shape (a domain list,
-// not a page of posts).
-postsRouter.get("/feed/federated-domains", optionalAuth, async (_req, res) => {
-  const actors = await prisma.actor.findMany({
-    where: {
-      posts: { some: { communityId: null, visibility: { in: ["public", "local_only"] } } },
-    },
-    select: { domain: true },
-    distinct: ["domain"],
-    orderBy: { domain: "asc" },
-  });
-  res.json(actors.map((a) => a.domain));
+// GET /feed/federated-domains[?scope=federated] -> populates the server
+// filter on the Federated and Home feeds. Registered as its own path,
+// not a query param on GET /feed itself, since it's a wholly different
+// shape (a domain list, not a page of posts).
+//
+// The two scopes answer genuinely different questions, not just a
+// narrower/wider version of the same one. Federated's is "every domain
+// with any eligible public post" — a firehose filter, so the list is
+// exactly as broad as the feed it narrows. Home's is "servers you're
+// actually connected to" (people you follow, servers you've subscribed
+// to via Explore) rather than "every domain among anything visible in
+// your feed" (which used to be this same query generalized to home
+// scope) — confirmed live that the latter listed 160+ domains, almost
+// all from Explore-cached content the viewer never asked to see
+// individually, making the picker too broad to actually use for what
+// it's for: narrowing down to specific people/servers you deliberately
+// listen to.
+postsRouter.get("/feed/federated-domains", optionalAuth, async (req, res) => {
+  const viewerId = req.actor?.id;
+  const federated = req.query.scope === "federated";
+
+  if (federated) {
+    const actors = await prisma.actor.findMany({
+      where: {
+        posts: { some: { communityId: null, visibility: { in: ["public", "local_only"] as PostVisibility[] } } },
+      },
+      select: { domain: true },
+      distinct: ["domain"],
+      orderBy: { domain: "asc" },
+    });
+    return res.json(actors.map((a) => a.domain));
+  }
+
+  if (!viewerId) return res.json([]);
+
+  const [followedDomains, subscribedServerDomains] = await Promise.all([
+    prisma.actor.findMany({
+      where: { followers: { some: { followerId: viewerId, state: "accepted" } } },
+      select: { domain: true },
+      distinct: ["domain"],
+    }),
+    prisma.exploreServer.findMany({
+      where: { subscriptions: { some: { actorId: viewerId } } },
+      select: { domain: true },
+    }),
+  ]);
+
+  const domains = [
+    ...new Set([...followedDomains.map((a) => a.domain), ...subscribedServerDomains.map((s) => s.domain)]),
+  ].sort();
+  res.json(domains);
 });
+
+// "new" keeps the existing cursor-paginated, multi-source merge below
+// entirely unchanged in shape — every other sort ranks by a metric
+// (score, score/age, comment count, recent-activity count) that isn't a
+// stored, monotonic column the way createdAt is, so cursor pagination
+// doesn't apply to them the same way; see the ranked branch further
+// down for how those are handled instead (a bounded candidate window,
+// ranked and paged by plain offset).
+const feedSortSchema = z.enum(["new", "top", "rising", "active", "comments"]);
+const feedRangeSchema = z.enum(["day", "week", "month", "all"]);
+
+function rangeStartDate(range: z.infer<typeof feedRangeSchema>): Date | null {
+  const now = Date.now();
+  switch (range) {
+    case "day":
+      return new Date(now - 24 * 60 * 60_000);
+    case "week":
+      return new Date(now - 7 * 24 * 60 * 60_000);
+    case "month":
+      return new Date(now - 30 * 24 * 60 * 60_000);
+    case "all":
+      return null;
+  }
+}
 
 postsRouter.get("/feed", optionalAuth, async (req, res) => {
   const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
   const viewerId = req.actor?.id;
   const federated = req.query.scope === "federated";
+
+  const sortParsed = feedSortSchema.safeParse(req.query.sort);
+  const sort = sortParsed.success ? sortParsed.data : "new";
+  const rangeParsed = feedRangeSchema.safeParse(req.query.range);
+  const range = rangeParsed.success ? rangeParsed.data : "all";
+  const rangeStart = rangeStartDate(range);
+  // "Show only these" (not "hide these") — an empty list means no
+  // narrowing at all, same as today, rather than "show nothing."
+  const communityIds =
+    typeof req.query.communityIds === "string"
+      ? req.query.communityIds.split(",").map((id) => id.trim()).filter(Boolean)
+      : [];
 
   const blockedIds = await blockedActorIds(viewerId);
 
@@ -487,18 +559,32 @@ postsRouter.get("/feed", optionalAuth, async (req, res) => {
         ).map((f) => f.followingId)
       : [];
 
-  // Federated-only filters — narrowing "everything this instance has
-  // cached" down by author domain and/or a keyword, since that firehose
-  // is exactly the scope broad enough to need it (Home is already
-  // narrowed to your own follows/circles/subscriptions). Ignored
-  // outside federated scope; there's no reason to filter an
-  // already-personal feed the same way.
+  // Author domain(s) and/or a keyword — was federated-scope-only, a
+  // single value (that firehose is the one broad enough to usually need
+  // narrowing down), now a "show only these" allow-list available on
+  // Home too, same shape as communityIds just below, so "which servers/
+  // circles show up" can actually narrow either feed. `communityIds`/
+  // `rangeStart` (parsed above) fold in here too, since all of these are
+  // just additional filter conditions layered onto whatever scope's own
+  // visibility rules already decide is eligible.
   const domainFilter =
-    federated && typeof req.query.domain === "string" && req.query.domain.trim()
-      ? req.query.domain.trim()
-      : undefined;
-  const qFilter =
-    federated && typeof req.query.q === "string" && req.query.q.trim() ? req.query.q.trim() : undefined;
+    typeof req.query.domain === "string"
+      ? req.query.domain.split(",").map((d) => d.trim()).filter(Boolean)
+      : [];
+  const qFilter = typeof req.query.q === "string" && req.query.q.trim() ? req.query.q.trim() : undefined;
+  const extraPostFilter = {
+    ...(domainFilter.length > 0 ? { author: { domain: { in: domainFilter } } } : {}),
+    ...(qFilter
+      ? {
+          OR: [
+            { title: { contains: qFilter, mode: "insensitive" as const } },
+            { body: { contains: qFilter, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+    ...(rangeStart ? { createdAt: { gte: rangeStart } } : {}),
+    ...(communityIds.length > 0 ? { communityId: { in: communityIds } } : {}),
+  };
 
   const postsWhere = federated
     ? {
@@ -509,35 +595,52 @@ postsRouter.get("/feed", optionalAuth, async (req, res) => {
           // recipient) can unlock it.
           { communityId: null, visibility: { in: ["public", "local_only"] as PostVisibility[] } },
           ...(blockedIds.length > 0 ? [{ authorActorId: { notIn: blockedIds } }] : []),
-          ...(domainFilter ? [{ author: { domain: domainFilter } }] : []),
-          ...(qFilter
-            ? [
-                {
-                  OR: [
-                    { title: { contains: qFilter, mode: "insensitive" as const } },
-                    { body: { contains: qFilter, mode: "insensitive" as const } },
-                  ],
-                },
-              ]
-            : []),
+          extraPostFilter,
         ],
       }
     : await (async () => {
-        const visibility = await postVisibilityWhere(viewerId);
+        // Deliberately NOT postVisibilityWhere(viewerId) here — that
+        // helper's own last OR branch ({ communityId: null, visibility:
+        // { in: ["public", "local_only"] } }, no author restriction at
+        // all) is exactly right for viewing one post by direct link
+        // (GET /posts/:id) or browsing a hashtag across everyone (GET
+        // /tags/:name), but wrong for Home: it means literally any
+        // public personal note this instance has ever cached — a
+        // relay's, an explore-sweep's before its own narrowing below
+        // even applies, anything ever resolved by URL — counts as
+        // "visible," so it can (and, confirmed live, does) crowd real
+        // follows/circles out of the recency-ordered take-25 below
+        // whenever there's enough of that other content sitting in the
+        // database. Home's own equivalent replaces that catch-all with
+        // one scoped to an actual relationship: a public/local_only note
+        // only counts here if its author is someone the viewer actually
+        // follows.
+        const homeVisibilityOr = [
+          { community: { privacy: "public" } },
+          ...(viewerId
+            ? [
+                { community: { members: { some: { actorId: viewerId, state: "accepted" } } } },
+                { authorActorId: viewerId },
+                {
+                  communityId: null,
+                  visibility: "specified" as const,
+                  recipients: { some: { actorId: viewerId } },
+                },
+              ]
+            : []),
+          ...(followedIds.length > 0
+            ? [
+                {
+                  communityId: null,
+                  authorActorId: { in: followedIds },
+                  visibility: { in: ["public", "followers", "local_only"] as PostVisibility[] },
+                },
+              ]
+            : []),
+        ];
         return {
           AND: [
-            followedIds.length > 0
-              ? {
-                  OR: [
-                    ...visibility.OR,
-                    {
-                      communityId: null,
-                      authorActorId: { in: followedIds },
-                      visibility: { in: ["public", "followers", "local_only"] as PostVisibility[] },
-                    },
-                  ],
-                }
-              : visibility,
+            { OR: homeVisibilityOr },
             ...(blockedIds.length > 0 ? [{ authorActorId: { notIn: blockedIds } }] : []),
             // Explore-cached content (federation/exploreSweep.ts) is
             // meant to be private to whoever subscribed to that server
@@ -571,32 +674,193 @@ postsRouter.get("/feed", optionalAuth, async (req, res) => {
                   : []),
               ],
             },
+            // Same reasoning and shape as the exploreCachedIn clause just
+            // above, for RSS/Atom content (federation/rssFeeds.ts) —
+            // private to whoever's actually listening to that feed.
+            {
+              OR: [
+                { rssCachedIn: { is: null } },
+                ...(viewerId
+                  ? [{ rssCachedIn: { is: { feed: { subscriptions: { some: { actorId: viewerId } } } } } }]
+                  : []),
+              ],
+            },
+            extraPostFilter,
           ],
         };
       })();
+
+  // Top/Rising/Active/Most-comments: ranks real Posts by an aggregate
+  // metric rather than createdAt, so it can't reuse the cursor-paginated
+  // multi-source merge below (a boost isn't a distinct thing to rank —
+  // it's a reshare of a Post that already gets ranked on its own
+  // merits, so boostedBy is always null here, unlike "new"). Ranks
+  // within a bounded, most-recent-first candidate window rather than
+  // truly everything postsWhere matches — for "all time" on a feed with
+  // more than RANK_CANDIDATE_CAP eligible posts, a genuinely old but
+  // still-highly-scored post outside that window won't surface, the
+  // same "make forward progress within a bound, not exhaustive" posture
+  // used elsewhere in this codebase (e.g. remote reply syncing). `cursor`
+  // here is a page number, not a post id, but reuses the same query
+  // param/response field the "new" path's own cursor does, so the
+  // frontend's "pass nextCursor back to load more" flow doesn't need to
+  // know which kind of feed it's paging through.
+  if (sort !== "new") {
+    // A freshly-cached federated post's local commentCount is close to
+    // meaningless for ranking purposes — comments only get pulled in
+    // from the origin server lazily, the first time someone actually
+    // opens that post's thread (routes/comments.ts), so most candidates
+    // sit at 0 regardless of how active the real post is. Confirmed
+    // live: sorting 500 candidates by raw commentCount surfaced nothing
+    // but zeros ahead of posts with real double-digit comment counts on
+    // their origin server. "comments" fetches each candidate's live
+    // count (federation/remoteEngagement.ts, the same fetch GET
+    // /posts/:id already does for one post) before ranking rather than
+    // after — a real per-post network cost, so the candidate window is
+    // cut down for this one sort specifically to keep it bounded.
+    const RANK_CANDIDATE_CAP = sort === "comments" ? 150 : 500;
+    const page = cursor && /^\d+$/.test(cursor) ? parseInt(cursor, 10) : 0;
+
+    const candidates = await prisma.post.findMany({
+      where: postsWhere,
+      take: RANK_CANDIDATE_CAP,
+      orderBy: { createdAt: "desc" },
+      include: postInclude,
+    });
+
+    const withVotes = await attachPostVotes(candidates, viewerId);
+    const withSaves = await attachCalendarSaves(withVotes, viewerId);
+    const withBoosted = await attachBoosted(withSaves, viewerId);
+    const withReactions = await attachReactions(withBoosted, viewerId);
+    const withPolls = await attachPolls(withReactions, viewerId);
+    const withBookmarked = await attachBookmarked(withPolls, viewerId);
+    const withCounts = withBookmarked.map(withCommentCount);
+
+    // "Most active" is a recent-activity signal (attention in roughly
+    // the last day), deliberately independent of the selected time
+    // range — a post's lifetime vote/comment totals (already available
+    // as score/commentCount) say nothing about whether it's active
+    // *right now*, which is what this sort is actually for. Only
+    // computed for this one bounded candidate set, not attempted feed-
+    // wide.
+    const recentActivityByPostId = new Map<string, number>();
+    if (sort === "active" && withCounts.length > 0) {
+      const recentWindowStart = new Date(Date.now() - 24 * 60 * 60_000);
+      const ids = withCounts.map((p) => p.id);
+      const [recentVotes, recentComments] = await Promise.all([
+        prisma.postVote.groupBy({
+          by: ["postId"],
+          where: { postId: { in: ids }, createdAt: { gte: recentWindowStart } },
+          _count: { _all: true },
+        }),
+        prisma.comment.groupBy({
+          by: ["postId"],
+          where: { postId: { in: ids }, createdAt: { gte: recentWindowStart } },
+          _count: { _all: true },
+        }),
+      ]);
+      for (const v of recentVotes) {
+        recentActivityByPostId.set(v.postId, (recentActivityByPostId.get(v.postId) ?? 0) + v._count._all);
+      }
+      for (const c of recentComments) {
+        recentActivityByPostId.set(c.postId, (recentActivityByPostId.get(c.postId) ?? 0) + c._count._all);
+      }
+    }
+
+    // Same live remote-engagement fetch the "new" path does below —
+    // duplicated rather than shared across the early return, since the
+    // two paths' post shapes diverge before this point (withCounts here
+    // vs. withBookmarked there). Run on the *candidate* set (not just
+    // the eventual page) for "comments" specifically, since ranking by
+    // this sort needs the real count before it can sort at all — see
+    // this branch's own opening comment. Every other sort still only
+    // fetches this for the final page, right before responding, same as
+    // before.
+    const remoteEngagementByPostId = new Map<
+      string,
+      { likes: number | null; shares: number | null; comments?: number | null }
+    >();
+    async function fetchRemoteEngagementFor(subjects: (typeof withCounts)[number][]): Promise<void> {
+      const eligible = subjects.filter((p) => {
+        if (!p.remoteId || remoteEngagementByPostId.has(p.id)) return false;
+        try {
+          return !new URL(p.remoteId).host.endsWith("reddit.com");
+        } catch {
+          return false;
+        }
+      });
+      if (eligible.length === 0) return;
+      const instanceActor = await getOrCreateInstanceActor();
+      await Promise.all(
+        eligible.map(async (p) => {
+          const counts = await fetchLiveCounts(p.remoteId!, instanceActor).catch(() => null);
+          if (counts) remoteEngagementByPostId.set(p.id, counts);
+        }),
+      );
+    }
+    if (sort === "comments") await fetchRemoteEngagementFor(withCounts);
+
+    const now = Date.now();
+    function metricFor(post: (typeof withCounts)[number]): number {
+      switch (sort) {
+        case "top":
+          return post.score;
+        case "rising": {
+          // Velocity, not raw score — a brand-new post with a handful of
+          // votes can outrank an old post that's merely accumulated more
+          // over a much longer time, which is the whole point of Rising
+          // versus Top. Floored at 1 hour so a post from the last few
+          // minutes doesn't get an extreme, noisy score/age ratio.
+          const ageHours = Math.max(1, (now - post.createdAt.getTime()) / 3_600_000);
+          return post.score / ageHours;
+        }
+        case "comments":
+          // The real, origin-reported total when available — falls back
+          // to the local (likely stale/zero) commentCount only for a
+          // local post, or one whose live fetch just failed.
+          return remoteEngagementByPostId.get(post.id)?.comments ?? post.commentCount;
+        case "active":
+          return recentActivityByPostId.get(post.id) ?? 0;
+        default:
+          return 0;
+      }
+    }
+
+    const ranked = [...withCounts].sort((a, b) => metricFor(b) - metricFor(a));
+    const pageStart = page * FEED_PAGE_SIZE;
+    const pagePosts = ranked.slice(pageStart, pageStart + FEED_PAGE_SIZE);
+    const rankedNextCursor = pageStart + FEED_PAGE_SIZE < ranked.length ? String(page + 1) : null;
+
+    await fetchRemoteEngagementFor(pagePosts);
+
+    return res.json({
+      posts: pagePosts.map((p) => ({
+        ...p,
+        boostedBy: null,
+        canEdit: canEditPost(p, viewerId),
+        remoteEngagement: remoteEngagementByPostId.get(p.id) ?? null,
+      })),
+      nextCursor: rankedNextCursor,
+    });
+  }
 
   const boostsWhere = federated
     ? {
         post: {
           communityId: null,
           ...(blockedIds.length > 0 ? { authorActorId: { notIn: blockedIds } } : {}),
-          ...(domainFilter ? { author: { domain: domainFilter } } : {}),
-          ...(qFilter
-            ? {
-                OR: [
-                  { title: { contains: qFilter, mode: "insensitive" as const } },
-                  { body: { contains: qFilter, mode: "insensitive" as const } },
-                ],
-              }
-            : {}),
+          ...extraPostFilter,
         },
       }
     : {
         actorId: { in: followedIds },
-        ...(blockedIds.length > 0 ? { post: { authorActorId: { notIn: blockedIds } } } : {}),
+        post: {
+          ...(blockedIds.length > 0 ? { authorActorId: { notIn: blockedIds } } : {}),
+          ...extraPostFilter,
+        },
       };
 
-  const [posts, boosts, explorePosts] = await Promise.all([
+  const [posts, boosts, explorePosts, rssPosts] = await Promise.all([
     prisma.post.findMany({
       where: postsWhere,
       take: FEED_PAGE_SIZE,
@@ -628,6 +892,23 @@ postsRouter.get("/feed", optionalAuth, async (req, res) => {
           where: {
             exploreCachedIn: { some: { server: { subscriptions: { some: { actorId: viewerId } } } } },
             ...(blockedIds.length > 0 ? { authorActorId: { notIn: blockedIds } } : {}),
+            ...extraPostFilter,
+          },
+          take: FEED_PAGE_SIZE,
+          orderBy: { createdAt: "desc" },
+          include: postInclude,
+        })
+      : Promise.resolve([]),
+    // Same reasoning as explorePosts just above, for RSS/Atom content
+    // (federation/rssFeeds.ts) — guarantees a feed you listen to shows
+    // up on the first page even if postsWhere's own cursor window filled
+    // up with follow-graph/community content first.
+    !federated && viewerId
+      ? prisma.post.findMany({
+          where: {
+            rssCachedIn: { is: { feed: { subscriptions: { some: { actorId: viewerId } } } } },
+            ...(blockedIds.length > 0 ? { authorActorId: { notIn: blockedIds } } : {}),
+            ...extraPostFilter,
           },
           take: FEED_PAGE_SIZE,
           orderBy: { createdAt: "desc" },
@@ -642,6 +923,7 @@ postsRouter.get("/feed", optionalAuth, async (req, res) => {
     ...posts.map((post) => ({ post, sortAt: post.createdAt, boostedBy: null })),
     ...boosts.map((b) => ({ post: b.post, sortAt: b.createdAt, boostedBy: b.actor })),
     ...explorePosts.map((post) => ({ post, sortAt: post.createdAt, boostedBy: null })),
+    ...rssPosts.map((post) => ({ post, sortAt: post.createdAt, boostedBy: null })),
   ];
 
   const seen = new Set<string>();
@@ -662,11 +944,46 @@ postsRouter.get("/feed", optionalAuth, async (req, res) => {
   const withPolls = await attachPolls(withReactions, viewerId);
   const withBookmarked = await attachBookmarked(withPolls, viewerId);
 
+  // Real origin like/reply counts, live — same fetch GET /posts/:id
+  // already does for a single post, now also done here despite the cost
+  // (a per-post live network round trip, in parallel, on every feed
+  // load) because a freshly-cached federated post's own score/
+  // commentCount are always ~0: whoever posted it had zero interactions
+  // *at the moment their server pushed it to our inbox*, and nothing
+  // about a follow-graph delivery ever tells us how that's changed
+  // since. Best-effort per post — one slow/unreachable server degrades
+  // to that post showing no remoteEngagement, not the whole feed.
+  const remoteEngagementByPostId = new Map<
+    string,
+    { likes: number | null; shares: number | null; comments?: number | null }
+  >();
+  // Reddit's remoteId (federation/rssFeeds.ts) is never a real
+  // ActivityPub object — a live signed fetch against it would only ever
+  // fail, so it's excluded up front rather than attempted and discarded.
+  const remoteCandidates = withBookmarked.filter((p) => {
+    if (!p.remoteId) return false;
+    try {
+      return !new URL(p.remoteId).host.endsWith("reddit.com");
+    } catch {
+      return false;
+    }
+  });
+  if (remoteCandidates.length > 0) {
+    const instanceActor = await getOrCreateInstanceActor();
+    await Promise.all(
+      remoteCandidates.map(async (p) => {
+        const counts = await fetchLiveCounts(p.remoteId!, instanceActor).catch(() => null);
+        if (counts) remoteEngagementByPostId.set(p.id, counts);
+      }),
+    );
+  }
+
   res.json({
     posts: withBookmarked.map((p) => ({
       ...withCommentCount(p),
       boostedBy: boostedByPostId.get(p.id) ?? null,
       canEdit: canEditPost(p, viewerId),
+      remoteEngagement: remoteEngagementByPostId.get(p.id) ?? null,
     })),
     nextCursor,
   });
@@ -800,16 +1117,32 @@ postsRouter.get("/posts/:id", optionalAuth, async (req, res) => {
   const [withPoll] = await attachPolls([withReactions], req.actor?.id);
   const [withBookmarked] = await attachBookmarked([withPoll], req.actor?.id);
 
-  // For a federated post, pull in its real reply thread (as ordinary
-  // Comment rows, so they render/vote/reply through the existing comment
-  // UI and federation) and its real origin-reported like/share counts —
-  // both fetched live, on this one already-slower single-post path, never
-  // on the feed. See federation/remoteEngagement.ts for the bounded walk.
+  // For a federated post, its real origin-reported like/share/comment
+  // counts — fetched live, on this one already-slower single-post path,
+  // never on the feed. The actual reply *thread* isn't synced here
+  // anymore — GET /posts/:postId/comments (routes/comments.ts) is the
+  // one place that happens now, since that's hit by every way a viewer
+  // actually looks at comments (this page, a feed's inline accordion,
+  // the Loops drawer), not just this one. commentCount below still
+  // reflects whatever's already been synced from an earlier comments
+  // fetch — a real, if momentarily stale, number, not a fresh sync
+  // trigger of its own.
   let commentCount = withBookmarked._count.comments;
-  let remoteEngagement: { likes: number | null; shares: number | null } | null = null;
-  if (post.remoteId) {
+  let remoteEngagement: { likes: number | null; shares: number | null; comments?: number | null } | null = null;
+  // Reddit's remoteId (federation/rssFeeds.ts) is never a real
+  // ActivityPub object — no live counts to fetch this way (Reddit's real
+  // API needs its own authenticated app, which this instance isn't set
+  // up for).
+  const isReddit = (() => {
+    if (!post.remoteId) return false;
+    try {
+      return new URL(post.remoteId).host.endsWith("reddit.com");
+    } catch {
+      return false;
+    }
+  })();
+  if (post.remoteId && !isReddit) {
     const instanceActor = await getOrCreateInstanceActor();
-    await syncRemoteReplies({ id: post.id, remoteId: post.remoteId }, instanceActor);
     remoteEngagement = await fetchLiveCounts(post.remoteId, instanceActor);
     commentCount = await prisma.comment.count({ where: { postId: post.id } });
   }

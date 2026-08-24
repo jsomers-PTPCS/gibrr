@@ -81,6 +81,85 @@ export function CommentIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// PostItem.tsx's "Translate this" button — a plain globe, since a
+// literal "A/文" glyph doesn't read cleanly at icon size.
+export function TranslateIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.5 2.5 3.5 5.8 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.8-3.5-9s1-6.5 3.5-9Z" />
+    </Icon>
+  );
+}
+
+// Loops' (app/loops/page.tsx) share button — opens a menu of external
+// share targets plus an in-app Whisper, replacing the old plain
+// "↗ view original" link.
+export function ShareIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9" />
+    </Icon>
+  );
+}
+
+// PageInfo.tsx's "what does this page do" toggle — the dot is a
+// zero-length line, not a small circle: stroke-linecap: round on the
+// shared Icon wrapper turns that into a filled dot without needing a
+// separate fill: currentColor override the way a real <circle> would
+// (the wrapper sets fill: none at the svg root).
+export function InfoIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <line x1="12" y1="11" x2="12" y2="16" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+    </Icon>
+  );
+}
+
+// Nav.tsx's mobile top-right Federated link — three connected nodes,
+// a network glyph standing in for "every other server this instance
+// knows about" rather than the single-globe TranslateIcon already uses
+// (that one means "translate," a different concept that happens to
+// also render as a globe elsewhere in this file).
+export function FederatedIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="5" r="2.5" />
+      <circle cx="5" cy="17" r="2.5" />
+      <circle cx="19" cy="17" r="2.5" />
+      <path d="M12 7.5v3M10.3 12.8 6.7 15M13.7 12.8l3.6 2.2" />
+    </Icon>
+  );
+}
+
+// app/federated/page.tsx's LongformCard "Read full article" button —
+// opens the real page on its origin site, in a new tab.
+export function ExternalLinkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      <polyline points="15 3 21 3 21 9" />
+      <line x1="10" y1="14" x2="21" y2="3" />
+    </Icon>
+  );
+}
+
+// LongformCard's "Subscribe" button — a mail glyph since a Ghost
+// subscription is a newsletter signup, not a follow.
+export function MailIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+      <polyline points="22 6 12 13 2 6" />
+    </Icon>
+  );
+}
+
 export function EditIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>

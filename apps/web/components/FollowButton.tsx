@@ -5,9 +5,9 @@ import { followHandle, unfollow, getFollowStatus, ApiError, type FollowStatus } 
 
 // Fediverse follow — distinct from FriendButton (mutual, request/accept)
 // and from joining a community: one-directional, and (via followHandle)
-// works across instances. Only ever shown on a local profile page, since
-// remote actors have no profile page in this app — see FollowPanel for
-// following someone by handle directly.
+// works across instances. Shown on any profile page, local or remote —
+// see FollowPanel for following someone by handle directly instead of
+// through their profile.
 export function FollowButton({
   username,
   domain,
@@ -21,10 +21,10 @@ export function FollowButton({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    getFollowStatus(username)
+    getFollowStatus(username, domain)
       .then((r) => setStatus(r.status))
       .catch(() => setStatus("none"));
-  }, [username]);
+  }, [username, domain]);
 
   async function follow() {
     setBusy(true);

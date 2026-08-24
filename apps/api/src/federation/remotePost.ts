@@ -165,6 +165,19 @@ export async function resolveAndCacheRemotePost(
   // software's own real objects was confirmed to use.
   const title = type !== "Note" && typeof fetched.name === "string" ? fetched.name : null;
 
+  // The object's own real webpage, when it publishes one separately from
+  // its AP id — confirmed live to matter for Ghost specifically: its
+  // Article `id` (.ghost/activitypub/article/{uuid}) always answers
+  // application/activity+json regardless of Accept header, so "view
+  // original" linking straight to remoteId the way every other
+  // platform's link works landed a reader on raw JSON-LD instead of the
+  // actual post. Only trusted when it's a bare string — PeerTube's
+  // Video repurposes this same `url` field for something else entirely
+  // (an array of media-format Link objects, see parsePeerTubeMedia
+  // above), so anything other than a plain string is left alone rather
+  // than risking a nonsense link for that shape.
+  const canonicalUrl = typeof fetched.url === "string" ? fetched.url : null;
+
   // Ghost's Article carries its image as a bare string, not the
   // attachment-array shape every other platform here uses — confirmed
   // live. parseAttachmentMedia already handles Note/Page's real shape
@@ -200,6 +213,7 @@ export async function resolveAndCacheRemotePost(
     create: {
       remoteId: fetched.id,
       title,
+      url: canonicalUrl,
       body,
       authorActorId: author.id,
       communityId: null,
@@ -209,7 +223,12 @@ export async function resolveAndCacheRemotePost(
       contentWarning: type === "Event" || type === "Article" ? null : parseContentWarning(fetched),
       ...media,
     },
-    update: {},
+    // Backfills url for a post cached before this field was captured —
+    // every other field stays update: {} (this function's whole point is
+    // "fetch once, cache forever," not keep re-syncing content), but an
+    // already-cached post with a broken "view original" link has no
+    // other path to ever pick up the fix.
+    update: { url: canonicalUrl },
     select: { id: true },
   });
   return post.id;

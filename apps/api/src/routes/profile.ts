@@ -15,6 +15,10 @@ import {
 import { aboutVisibilitySchema, redactAboutFields } from "../federation/aboutFields.js";
 import { relationshipStatusSchema } from "../federation/relationshipStatus.js";
 import { fetchBookwyrmActivity } from "../federation/bookwyrmActivity.js";
+import { discoverActor, upsertRemoteActor } from "../federation/remoteActor.js";
+import { localDomain, isLocalActor, getOrCreateInstanceActor } from "../federation/localActor.js";
+import { fetchActorTimelineForDomain } from "../federation/exploreDispatch.js";
+import { resolveAndCacheRemotePost } from "../federation/remotePost.js";
 import { requireAuth, optionalAuth } from "../auth/session.js";
 import { areFriends } from "./friends.js";
 import { postInclude, FEED_PAGE_SIZE, withCommentCount, postVisibilityWhere } from "./posts.js";
@@ -29,15 +33,62 @@ import {
 
 export const profileRouter = Router();
 
-// GET /profile/:username -> public profile: actor info, follower/following/post
-// counts, and their recent posts. Distinct from GET /users/:username (the
-// canonical ActivityPub actor IRI, serving JSON-LD) so the web app has a
-// plain-JSON shape to consume without content negotiation.
+// GET /profile/:username[?domain=] -> public profile: actor info,
+// follower/following/post counts, and their recent posts. Distinct from
+// GET /users/:username (the canonical ActivityPub actor IRI, serving
+// JSON-LD) so the web app has a plain-JSON shape to consume without
+// content negotiation.
+//
+// `domain` disambiguates same-named actors across servers — without it,
+// this falls back to the old bare-username lookup for local profile
+// links. Given a domain that isn't ours and doesn't match any actor
+// we've already cached, this resolves+caches them live (same webfinger
+// path as following someone) so a search/circles result can always open
+// a real in-app profile instead of linking out.
+//
+// On that same first load, it also best-effort backfills their posts via
+// fetchActorTimelineForDomain (federation/exploreDispatch.ts) — a real
+// per-account lookup for Mastodon-API-compatible software (confirmed
+// live: trending/local-timeline sampling essentially never surfaces a
+// specific account's posts by luck, so Explore's own domain-wide
+// dispatcher isn't good enough here), falling back to that same
+// whole-domain fetch, filtered to this actor's entries, for software
+// without one — for a single-actor site (a Ghost blog, most Loops/
+// PeerTube instances) that's equivalent to their real history; for a
+// big multi-user instance running one of those, it only catches
+// whatever of theirs is in that instance's current public sample.
 profileRouter.get("/profile/:username", optionalAuth, async (req, res) => {
   const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+  const domain = typeof req.query.domain === "string" ? req.query.domain : undefined;
 
-  const actor = await prisma.actor.findFirst({ where: { username: req.params.username } });
+  let actor = domain
+    ? await prisma.actor.findUnique({ where: { username_domain: { username: req.params.username, domain } } })
+    : await prisma.actor.findFirst({ where: { username: req.params.username } });
+
+  if (!actor && domain && domain !== localDomain()) {
+    const remote = await discoverActor(`${req.params.username}@${domain}`, req.actor ?? undefined);
+    if (remote) actor = await upsertRemoteActor(remote);
+  }
+
   if (!actor) return res.status(404).json({ error: "not found" });
+
+  if (!cursor && !isLocalActor(actor)) {
+    try {
+      const timeline = await fetchActorTimelineForDomain(actor.domain, actor.username);
+      // A no-op filter for the account-specific fetch (already exactly
+      // this actor's own posts) — still needed for the domain-wide
+      // fallback paths (Ghost/Loops/etc.), which return everyone's.
+      const theirs = timeline?.filter((status) => status.author.username === actor!.username) ?? [];
+      const instanceActor = await getOrCreateInstanceActor();
+      await Promise.all(
+        theirs.map((status) => resolveAndCacheRemotePost(status.url, instanceActor).catch(() => null)),
+      );
+    } catch {
+      // Best-effort — a domain that doesn't speak any known timeline
+      // shape (or is simply unreachable) just leaves whatever was
+      // already cached, same as before this backfill existed.
+    }
+  }
 
   const visibility = await postVisibilityWhere(req.actor?.id);
   const [followerCount, followingCount, posts, comments] = await Promise.all([

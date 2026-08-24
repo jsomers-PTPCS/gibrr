@@ -28,6 +28,9 @@ import {
   addAdminExploreServer,
   removeAdminExploreServer,
   startExploreServerOAuth,
+  getFediDbSyncStatus,
+  setFediDbSyncSettings,
+  runFediDbSyncNow,
   API_URL,
   ApiError,
   type Me,
@@ -39,6 +42,7 @@ import {
   type CustomEmoji,
   type DomainBlock,
   type ExploreServer,
+  type FediDbSyncStatus,
 } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { DiskUsageMeter } from "./DiskUsageMeter";
@@ -122,6 +126,12 @@ export function AdminTab() {
   const [exploreServerError, setExploreServerError] = useState<string | null>(null);
   const [removingExploreDomain, setRemovingExploreDomain] = useState<string | null>(null);
   const [exploreOauthNotice, setExploreOauthNotice] = useState<{ success: boolean; domain?: string } | null>(null);
+  const [fediDbSync, setFediDbSync] = useState<FediDbSyncStatus | "loading" | "error">("loading");
+  const [fediDbEnabled, setFediDbEnabled] = useState(false);
+  const [fediDbMinUserCount, setFediDbMinUserCount] = useState(10_000);
+  const [savingFediDbSync, setSavingFediDbSync] = useState(false);
+  const [runningFediDbSync, setRunningFediDbSync] = useState(false);
+  const [fediDbSyncError, setFediDbSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     getMe()
@@ -151,6 +161,7 @@ export function AdminTab() {
     refreshCustomEmoji();
     refreshDomainBlocks();
     refreshExploreServers();
+    refreshFediDbSync();
   }, [me, router]);
 
   function refreshDomainBlocks() {
@@ -163,6 +174,49 @@ export function AdminTab() {
     getAdminExploreServers()
       .then(setExploreServers)
       .catch(() => setExploreServers("error"));
+  }
+
+  function refreshFediDbSync() {
+    getFediDbSyncStatus()
+      .then((status) => {
+        setFediDbSync(status);
+        setFediDbEnabled(status.enabled);
+        setFediDbMinUserCount(status.minUserCount);
+      })
+      .catch(() => setFediDbSync("error"));
+  }
+
+  async function handleSaveFediDbSync(e: FormEvent) {
+    e.preventDefault();
+    setSavingFediDbSync(true);
+    setFediDbSyncError(null);
+    try {
+      const status = await setFediDbSyncSettings(fediDbEnabled, fediDbMinUserCount);
+      setFediDbSync(status);
+    } catch {
+      setFediDbSyncError("Could not save those settings.");
+    } finally {
+      setSavingFediDbSync(false);
+    }
+  }
+
+  // Saves first (so "Sync now" always reflects whatever's currently
+  // typed, not just whatever was last explicitly saved) then triggers
+  // an immediate run — fire-and-forget on the API side (202), so this
+  // just re-fetches status a moment later rather than waiting for the
+  // sync (which can take a while: FediDB has a lot of servers, and
+  // every new one gets a live verification probe) to actually finish.
+  async function handleRunFediDbSyncNow() {
+    setRunningFediDbSync(true);
+    setFediDbSyncError(null);
+    try {
+      await setFediDbSyncSettings(fediDbEnabled, fediDbMinUserCount);
+      await runFediDbSyncNow();
+    } catch {
+      setFediDbSyncError("Could not start a sync.");
+    } finally {
+      setRunningFediDbSync(false);
+    }
   }
 
   // The API's OAuth callback (routes/admin.ts) redirects here with
@@ -178,24 +232,76 @@ export function AdminTab() {
     router.replace("/settings?tab=host");
   }, [router]);
 
+  function explorAddErrorMessage(err: unknown, fallback = "could not add that server"): string {
+    if (!(err instanceof ApiError)) return fallback;
+    if (typeof err.body !== "object" || !err.body || !("error" in err.body)) {
+      return JSON.stringify(err.body);
+    }
+    const errorValue = (err.body as { error: unknown }).error;
+    // Usually a plain string, but a failed Zod validation (e.g. a
+    // domain that doesn't even look like one) comes back as its
+    // .flatten() shape instead — an object, which String(...) would
+    // otherwise stringify as the useless literal "[object Object]".
+    if (typeof errorValue === "string") return errorValue;
+    if (typeof errorValue === "object" && errorValue) {
+      const fieldErrors = (errorValue as { fieldErrors?: Record<string, string[]> }).fieldErrors;
+      const firstFieldError = fieldErrors && Object.values(fieldErrors).flat()[0];
+      if (firstFieldError) return firstFieldError;
+    }
+    return JSON.stringify(errorValue);
+  }
+
+  // A bare ASCII domain is all the API accepts, but a server list
+  // copied from somewhere (a fediverse directory site, a friend's
+  // message) is usually full real links, sometimes to a domain in its
+  // native script — strip a leading scheme/path so pasting
+  // "https://mastodon.social/" works the same as typing
+  // "mastodon.social" directly, and route through URL's own host
+  // parsing to punycode-encode anything non-ASCII (confirmed live:
+  // "ratatöskr.de" -> "xn--ratatskr-r4a.de", "嘟文.com" ->
+  // "xn--j5r817a.com", even an emoji domain) the same way a browser's
+  // address bar would — the backend's domain-shape check is ASCII-only,
+  // so real internationalized fediverse domains would otherwise fail
+  // validation outright instead of just being added under their real
+  // wire-format name.
+  function normalizeDomainInput(raw: string): string {
+    const stripped = raw.trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+    if (!stripped) return "";
+    try {
+      return new URL(`https://${stripped}`).host;
+    } catch {
+      return stripped;
+    }
+  }
+
+  // Accepts a comma-separated list so adding a batch of servers doesn't
+  // mean submitting the form once per domain — the optional display
+  // name only makes sense for a single domain at a time (there's no
+  // sensible way to apply one name across several different servers),
+  // so it's dropped whenever more than one is given. Domains are added
+  // in parallel and independently: one bad domain in the list shouldn't
+  // block the rest from succeeding, so failures are collected and shown
+  // together rather than aborting on the first one.
   async function handleAddExploreServer(e: FormEvent) {
     e.preventDefault();
-    if (!exploreDomain.trim()) return;
+    const domains = [...new Set(exploreDomain.split(",").map(normalizeDomainInput).filter(Boolean))];
+    if (domains.length === 0) return;
     setAddingExploreServer(true);
     setExploreServerError(null);
     try {
-      await addAdminExploreServer(exploreDomain.trim(), exploreName.trim() || undefined);
-      setExploreDomain("");
-      setExploreName("");
-      refreshExploreServers();
-    } catch (err) {
-      setExploreServerError(
-        err instanceof ApiError
-          ? typeof err.body === "object" && err.body && "error" in err.body
-            ? String((err.body as { error: unknown }).error)
-            : JSON.stringify(err.body)
-          : "could not add that server",
+      const results = await Promise.allSettled(
+        domains.map((domain) => addAdminExploreServer(domain, domains.length === 1 ? exploreName.trim() || undefined : undefined)),
       );
+      const failures = results
+        .map((result, i) => (result.status === "rejected" ? `${domains[i]}: ${explorAddErrorMessage(result.reason)}` : null))
+        .filter((message): message is string => message !== null);
+      if (failures.length > 0) {
+        setExploreServerError(failures.join(" · "));
+      } else {
+        setExploreDomain("");
+        setExploreName("");
+      }
+      refreshExploreServers();
     } finally {
       setAddingExploreServer(false);
     }
@@ -205,23 +311,26 @@ export function AdminTab() {
   // screen — for servers like Pixelfed whose public timeline requires
   // a logged-in user, not just a publicly reachable one. Redirects back
   // to /admin (handled by the effect above) once the admin authorizes.
-  async function handleConnectExploreServerOAuth() {
-    if (!exploreDomain.trim()) return;
+  // Inherently single-target (there's one login screen to send the
+  // admin to), unlike "Add server" — the button calling this is
+  // disabled whenever the domain field holds more than one domain.
+  async function connectServerOAuth(domain: string, name?: string) {
     setConnectingExploreOAuth(true);
     setExploreServerError(null);
     try {
-      const { authorizeUrl } = await startExploreServerOAuth(exploreDomain.trim(), exploreName.trim() || undefined);
+      const { authorizeUrl } = await startExploreServerOAuth(domain, name);
       window.location.href = authorizeUrl;
     } catch (err) {
-      setExploreServerError(
-        err instanceof ApiError
-          ? typeof err.body === "object" && err.body && "error" in err.body
-            ? String((err.body as { error: unknown }).error)
-            : JSON.stringify(err.body)
-          : "could not start that connection",
-      );
+      setExploreServerError(explorAddErrorMessage(err, "could not start that connection"));
       setConnectingExploreOAuth(false);
     }
+  }
+
+  function handleConnectExploreServerOAuth() {
+    if (exploreDomain.includes(",")) return;
+    const domain = normalizeDomainInput(exploreDomain);
+    if (!domain) return;
+    connectServerOAuth(domain, exploreName.trim() || undefined);
   }
 
   async function handleRemoveExploreServer(server: ExploreServer) {
@@ -887,7 +996,14 @@ export function AdminTab() {
         )}
       </div>
 
-      <h2 style={{ marginTop: "1.5rem" }}>Explore servers</h2>
+      <h2 style={{ marginTop: "1.5rem", display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
+        Explore servers
+        {Array.isArray(exploreServers) && (
+          <span className="text-faint" style={{ fontSize: "0.9rem", fontWeight: 400 }}>
+            {exploreServers.length} server{exploreServers.length === 1 ? "" : "s"}
+          </span>
+        )}
+      </h2>
       <p className="text-faint">
         Servers users can browse trending/public content from under Explore — a live read of each
         server's own real public API, not federation. Mastodon, Pleroma/Akkoma, Misskey, Lemmy,
@@ -916,14 +1032,15 @@ export function AdminTab() {
             style={{ flex: 1, minWidth: 0 }}
             value={exploreDomain}
             onChange={(e) => setExploreDomain(e.target.value)}
-            placeholder="mastodon.social"
+            placeholder="mastodon.social, pixelfed.social, …"
           />
           <input
             className="input"
             style={{ flex: 2, minWidth: 0 }}
             value={exploreName}
             onChange={(e) => setExploreName(e.target.value)}
-            placeholder="Display name (optional)"
+            placeholder="Display name (optional, single server only)"
+            disabled={exploreDomain.includes(",")}
           />
           <button type="submit" className="btn btn-primary" disabled={addingExploreServer}>
             {addingExploreServer ? "…" : "Add server"}
@@ -931,7 +1048,8 @@ export function AdminTab() {
           <button
             type="button"
             className="btn btn-ghost"
-            disabled={connectingExploreOAuth}
+            disabled={connectingExploreOAuth || exploreDomain.includes(",")}
+            title={exploreDomain.includes(",") ? "OAuth connects one server at a time" : undefined}
             onClick={handleConnectExploreServerOAuth}
           >
             {connectingExploreOAuth ? "…" : "Connect via OAuth"}
@@ -960,9 +1078,10 @@ export function AdminTab() {
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                     <strong>{server.name || server.domain}</strong>
                     {server.connected && <span className="pill">OAuth connected</span>}
+                    {server.source === "fedidb" && <span className="pill">via FediDB</span>}
                   </div>
                   {server.name && (
                     <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
@@ -980,6 +1099,65 @@ export function AdminTab() {
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      <h2 style={{ marginTop: "1.5rem" }}>FediDB auto-sync</h2>
+      <p className="text-faint">
+        Automatically add every server{" "}
+        <a href="https://fedidb.org" target="_blank" rel="noreferrer">
+          FediDB
+        </a>{" "}
+        knows about with at least this many users — new ones that cross the threshold get picked
+        up on the next scheduled sync (every 24h) without you adding them by hand. Each candidate
+        still gets the same live verification a manual Add server does, so ones that don&apos;t
+        actually work (wrong software, offline) are skipped automatically.
+      </p>
+      <div className="card">
+        {fediDbSync === "loading" ? (
+          <p className="text-dim">Loading…</p>
+        ) : fediDbSync === "error" ? (
+          <p className="error-text">Could not load FediDB sync status.</p>
+        ) : (
+          <form onSubmit={handleSaveFediDbSync} style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                type="checkbox"
+                checked={fediDbEnabled}
+                onChange={(e) => setFediDbEnabled(e.target.checked)}
+              />
+              Enabled
+            </label>
+            <label className="field">
+              Minimum user count
+              <input
+                className="input"
+                type="number"
+                min={0}
+                value={fediDbMinUserCount}
+                onChange={(e) => setFediDbMinUserCount(Math.max(0, Number(e.target.value) || 0))}
+              />
+            </label>
+            {fediDbSync.lastSyncAt && (
+              <p className="text-faint" style={{ margin: 0 }}>
+                Last synced {new Date(fediDbSync.lastSyncAt).toLocaleString()}
+              </p>
+            )}
+            {fediDbSyncError && <p className="error-text">{fediDbSyncError}</p>}
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button type="submit" className="btn btn-primary" disabled={savingFediDbSync}>
+                {savingFediDbSync ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={runningFediDbSync}
+                onClick={handleRunFediDbSyncNow}
+              >
+                {runningFediDbSync ? "Starting…" : "Sync now"}
+              </button>
+            </div>
+          </form>
         )}
       </div>
 
@@ -1140,6 +1318,7 @@ export function AdminTab() {
           </div>
         )}
       </div>
+
     </>
   );
 }

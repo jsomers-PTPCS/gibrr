@@ -24,6 +24,7 @@ import {
 import { PostItem } from "../../components/PostItem";
 import { Avatar } from "../../components/Avatar";
 import { RenderedDescription } from "../../components/RenderedDescription";
+import { PageInfo } from "../../components/PageInfo";
 import { ABOUT_FIELD_LABELS } from "../../lib/aboutFields";
 import { dedupeDirectoriesByUrl, type FediverseDirectoryLink } from "../../lib/fediverseDirectories";
 
@@ -172,12 +173,11 @@ function SearchResultsInner() {
   if (!q) {
     return (
       <main className="page">
-        <h1>Search</h1>
-        <p className="text-dim" style={{ marginTop: 0 }}>
+        <PageInfo title="Search">
           Search Gibrr by name, handle, or a pasted Gib URL — or browse the wider fediverse
-          below. There's no crawled index of the fediverse (no server has one), so these are
+          below. There&apos;s no crawled index of the fediverse (no server has one), so these are
           independent, third-party directories, not a Gibrr search.
-        </p>
+        </PageInfo>
 
         <h2 style={{ fontSize: "1.1rem" }}>Find people</h2>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1.5rem" }}>
@@ -260,36 +260,21 @@ function SearchResultsInner() {
         <p className="text-faint">Looking up {q} on the fediverse…</p>
       ) : personPreview ? (
         <div className="card" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          {personPreview.url ? (
-            <a
-              href={personPreview.url}
-              target="_blank"
-              rel="noreferrer"
-              style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: 0, color: "inherit" }}
-            >
-              <Avatar name={personPreview.displayName ?? personPreview.username} size={40} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <strong>{personPreview.displayName ?? personPreview.username}</strong>
-                <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
-                  @{personPreview.username}@{personPreview.domain} ↗
-                </p>
-              </div>
-            </a>
-          ) : (
-            <Link
-              href={`/u/${personPreview.username}`}
-              style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: 0, color: "inherit" }}
-            >
-              <Avatar name={personPreview.displayName ?? personPreview.username} size={40} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <strong>{personPreview.displayName ?? personPreview.username}</strong>
-                <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
-                  @{personPreview.username}@{personPreview.domain}
-                </p>
-              </div>
-            </Link>
-          )}
-          {followState === "sent" ? (
+          <Link
+            href={`/u/${personPreview.username}?domain=${encodeURIComponent(personPreview.domain)}`}
+            style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: 0, color: "inherit" }}
+          >
+            <Avatar name={personPreview.displayName ?? personPreview.username} size={40} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <strong>{personPreview.displayName ?? personPreview.username}</strong>
+              <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
+                @{personPreview.username}@{personPreview.domain}
+              </p>
+            </div>
+          </Link>
+          {personPreview.status === "accepted" ? (
+            <span className="text-faint">✓ Listened</span>
+          ) : personPreview.status === "pending" || followState === "sent" ? (
             <span className="text-faint">Request sent</span>
           ) : (
             <button
@@ -347,7 +332,7 @@ function SearchResultsInner() {
               {results.actors.map((actor) => (
                 <li key={actor.id}>
                   <Link
-                    href={`/u/${actor.username}`}
+                    href={`/u/${actor.username}?domain=${encodeURIComponent(actor.domain)}`}
                     className="conversation-row"
                     style={{ color: "inherit" }}
                   >

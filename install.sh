@@ -50,35 +50,12 @@ fi
 read -r -p "Domain for the API/federation [api.$WEB_DOMAIN]: " API_DOMAIN
 API_DOMAIN="${API_DOMAIN:-api.$WEB_DOMAIN}"
 
-echo
-echo "Outgoing email (verification links, password resets) — optional."
-echo "Leave blank to skip: emails will just be logged instead of sent,"
-echo "fine to try the app, not fine for real users to reset a password."
-read -r -p "SMTP host (blank to skip): " SMTP_HOST
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=
-SMTP_PASS=
-SMTP_FROM="no-reply@$WEB_DOMAIN"
-if [ -n "$SMTP_HOST" ]; then
-  read -r -p "SMTP port [587]: " input; SMTP_PORT="${input:-587}"
-  read -r -p "SMTP username: " SMTP_USER
-  read -r -s -p "SMTP password: " SMTP_PASS; echo
-  read -r -p "\"From\" address [no-reply@$WEB_DOMAIN]: " input; SMTP_FROM="${input:-$SMTP_FROM}"
-fi
-
 POSTGRES_PASSWORD="$(openssl rand -hex 24 2>/dev/null || head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 32)"
 
 cat > .env.prod <<EOF
 WEB_DOMAIN=$WEB_DOMAIN
 API_DOMAIN=$API_DOMAIN
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-SMTP_HOST=$SMTP_HOST
-SMTP_PORT=$SMTP_PORT
-SMTP_SECURE=$SMTP_SECURE
-SMTP_USER=$SMTP_USER
-SMTP_PASS=$SMTP_PASS
-SMTP_FROM=$SMTP_FROM
 EOF
 chmod 600 .env.prod
 

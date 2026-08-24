@@ -15,7 +15,7 @@ import {
 import { Avatar } from "./Avatar";
 import { MessageIcon } from "./MessageIcon";
 import { timeAgo } from "../lib/timeAgo";
-import { onOpenChatDock, onToggleChatDockList } from "../lib/chatDock";
+import { onOpenChatDock, onToggleChatDockList, onShareToChatDock } from "../lib/chatDock";
 
 const LIST_POLL_MS = 10000;
 const THREAD_POLL_MS = 3000;
@@ -38,6 +38,11 @@ export function ChatDock() {
   const [newHandle, setNewHandle] = useState("");
   const [startingConversation, setStartingConversation] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  // Set by shareToChatDock (lib/chatDock.ts) while waiting for the user
+  // to pick/start a conversation to share into — dropped into `draft`
+  // the moment one opens, then cleared so it doesn't leak into the next
+  // unrelated thread.
+  const [pendingShare, setPendingShare] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -90,6 +95,13 @@ export function ChatDock() {
     });
   }, []);
 
+  useEffect(() => {
+    return onShareToChatDock((text) => {
+      setPendingShare(text);
+      setView("list");
+    });
+  }, []);
+
   async function handleSend(e: FormEvent) {
     e.preventDefault();
     if (!draft.trim() || !activeId) return;
@@ -118,6 +130,10 @@ export function ChatDock() {
       setActiveOtherName(conversation.otherActor.displayName ?? conversation.otherActor.username);
       setMessages("loading");
       setView("thread");
+      if (pendingShare) {
+        setDraft(pendingShare);
+        setPendingShare(null);
+      }
       getConversations().then(setConversations).catch(() => {});
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -153,10 +169,22 @@ export function ChatDock() {
         <>
           <div className="chat-dock-header">
             <strong>Whispers</strong>
-            <button className="chat-dock-close" onClick={() => setView("collapsed")} aria-label="Close">
+            <button
+              className="chat-dock-close"
+              onClick={() => {
+                setView("collapsed");
+                setPendingShare(null);
+              }}
+              aria-label="Close"
+            >
               ×
             </button>
           </div>
+          {pendingShare && (
+            <p className="text-faint" style={{ margin: "0 0.25rem 0.5rem", fontSize: "0.85rem" }}>
+              Pick or start a conversation to share that link into.
+            </p>
+          )}
           <form
             onSubmit={handleStartConversation}
             style={{ display: "flex", gap: "0.4rem", padding: "0 0.25rem 0.5rem" }}
@@ -200,6 +228,10 @@ export function ChatDock() {
                       setActiveOtherName(name);
                       setMessages("loading");
                       setView("thread");
+                      if (pendingShare) {
+                        setDraft(pendingShare);
+                        setPendingShare(null);
+                      }
                     }}
                   >
                     <Avatar name={name} size={40} />

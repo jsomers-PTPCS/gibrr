@@ -13,6 +13,13 @@ interface CacheEntry {
 }
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour — instance software changes rarely
+// A null result is usually a transient failure (a slow/unreachable
+// server caught in a burst of many concurrent lookups, e.g. a Loops/
+// Longform feed request fanning this out across every ExploreServer at
+// once) rather than "this domain doesn't run recognizable software" —
+// caching it for the same hour as a real answer would keep hiding a
+// domain that was simply slow to answer once.
+const NULL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const cache = new Map<string, CacheEntry>();
 
 async function fetchJson(url: string): Promise<Record<string, unknown> | null> {
@@ -55,7 +62,8 @@ function prettySoftwareName(name: string): string {
 
 export async function fetchInstanceSoftware(domain: string): Promise<string | null> {
   const cached = cache.get(domain);
-  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.software;
+  const ttl = cached?.software === null ? NULL_CACHE_TTL_MS : CACHE_TTL_MS;
+  if (cached && Date.now() - cached.fetchedAt < ttl) return cached.software;
 
   const software = await lookupInstanceSoftware(domain);
   cache.set(domain, { software, fetchedAt: Date.now() });

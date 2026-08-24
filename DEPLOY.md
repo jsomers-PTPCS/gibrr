@@ -30,9 +30,6 @@ cd gibrr
 It'll ask for:
 - the site's domain
 - the API/federation domain (defaults to `api.<site domain>`)
-- outgoing SMTP settings, optional — skip it and verification/reset
-  emails just get logged instead of sent, which is fine to kick the
-  tires but not fine for real users who lock themselves out
 
 Then it builds the images and brings the stack up. First build takes a
 few minutes. Once it's done, visit `https://<your site domain>/setup` to

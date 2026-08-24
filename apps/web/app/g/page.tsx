@@ -4,23 +4,20 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  getCommunities,
   createCommunity,
-  joinCommunity,
   leaveCommunity,
-  search,
-  lookupRemoteGroup,
-  joinRemoteGroup,
   getCommunityMemberships,
   getExploreServers,
   subscribeToExploreServer,
   unsubscribeFromExploreServer,
   getMe,
+  getFollowGraph,
+  unfollow,
   ApiError,
   type Community,
   type Me,
-  type RemoteGroupPreview,
   type ExploreServer,
+  type FollowSummary,
 } from "../../lib/api";
 import {
   GROUP_PRIVACY_LABELS,
@@ -28,50 +25,42 @@ import {
   GROUP_PRIVACY_DESCRIPTIONS,
   type GroupPrivacy,
 } from "../../lib/groupRoles";
-import { RenderedDescription } from "../../components/RenderedDescription";
 import { AntennasTab } from "../../components/AntennasTab";
-
-// Same constraint as /search's remote lookup: no crawled index of the
-// fediverse exists to fuzzy-search against (no server has one) — a
-// remote-group lookup only makes sense once the query is already a
-// complete handle, not an arbitrary search term.
-const HANDLE_PATTERN = /^[a-zA-Z0-9_]+@[a-zA-Z0-9.-]+(:[0-9]+)?$/;
-
-// A plain-text, single-line teaser derived from an already-sanitized
-// description (see api's descriptionHtml.ts) — purely for this compact
-// list row's truncated display, not re-rendered as HTML, so there's no
-// security concern in a quick regex strip here.
-function descriptionTeaser(html: string): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
+import { RssFeedsTab } from "../../components/RssFeedsTab";
+import { Avatar } from "../../components/Avatar";
+import { PageInfo } from "../../components/PageInfo";
 
 export default function GroupsPage() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
-  const [tab, setTab] = useState<"discover" | "mine" | "explore" | "watching">("mine");
+  const [tab, setTab] = useState<"mine" | "explore" | "watching">("mine");
 
   const [exploreServers, setExploreServers] = useState<
     (ExploreServer & { subscribed: boolean })[] | "loading" | "error"
   >("loading");
   const [subscribingDomain, setSubscribingDomain] = useState<string | null>(null);
 
-  // Discover: browse-all when query is empty, GET /search's group results
-  // otherwise — one state, one effect, so there's never a stale mix of
-  // the two on screen.
-  const [query, setQuery] = useState("");
-  const [discoverResults, setDiscoverResults] = useState<Community[] | "loading">("loading");
-  const [remoteGroup, setRemoteGroup] = useState<RemoteGroupPreview | "loading" | null>(null);
-  const [remoteJoinState, setRemoteJoinState] = useState<"idle" | "joining" | "requested" | "error">(
-    "idle",
-  );
-
   // The viewer's real, persisted memberships — the single source of truth
-  // for "Join" vs "✓ Joined" everywhere on this page (and for the My
-  // Groups tab), rather than only reflecting whatever was clicked this
-  // session.
+  // for "✓ Joined" everywhere on this page (and for the My Groups tab),
+  // rather than only reflecting whatever was clicked this session.
   const [myGroups, setMyGroups] = useState<Community[] | "loading">("loading");
-  const [pendingRequests, setPendingRequests] = useState<Set<string>>(new Set());
   const [joining, setJoining] = useState<string | null>(null);
+
+  // People the viewer follows ("Listening to"), shown alongside their
+  // joined circles on the My Circles tab — same follow graph the
+  // Relationships tab's FollowPanel already reads.
+  const [following, setFollowing] = useState<FollowSummary[] | "loading">("loading");
+  const [unlistening, setUnlistening] = useState<string | null>(null);
+  // Filters both the circles and the people lists on My Circles — this
+  // tab already has everything loaded client-side (myGroups/following),
+  // so a live substring filter needs no round trip, unlike Discover's
+  // query which hits the search API.
+  const [myCirclesQuery, setMyCirclesQuery] = useState("");
+  // Explore's own search — everything here is already loaded
+  // client-side (getExploreServers fetched once up front), so this is
+  // a plain substring filter, same posture as myCirclesFilter below.
+  // Matters more now that FediDB auto-sync can make this list large.
+  const [exploreQuery, setExploreQuery] = useState("");
 
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
@@ -92,46 +81,48 @@ export default function GroupsPage() {
         getExploreServers()
           .then(setExploreServers)
           .catch(() => setExploreServers("error"));
+        getFollowGraph(m.actor.username)
+          .then((graph) => setFollowing(graph.following.filter((f) => f.state === "accepted")))
+          .catch(() => setFollowing([]));
       })
       .catch(() => {
         setMe(null);
         setMyGroups([]);
         setExploreServers([]);
+        setFollowing([]);
       });
   }, []);
 
-  useEffect(() => {
-    const q = query.trim();
-    if (!q) {
-      setDiscoverResults("loading");
-      getCommunities().then(setDiscoverResults);
-      setRemoteGroup(null);
-      return;
-    }
+  // My Circles' own search — everything here is already loaded
+  // client-side, so this is a plain substring filter, not a round trip
+  // to GET /search the way Discover's query is.
+  const myCirclesFilter = myCirclesQuery.trim().toLowerCase();
+  const filteredMyGroups: Community[] = Array.isArray(myGroups)
+    ? myGroups.filter(
+        (c) =>
+          !myCirclesFilter ||
+          c.title.toLowerCase().includes(myCirclesFilter) ||
+          c.actor.username.toLowerCase().includes(myCirclesFilter),
+      )
+    : [];
+  const filteredFollowing: FollowSummary[] = Array.isArray(following)
+    ? following.filter(
+        (p) =>
+          !myCirclesFilter ||
+          (p.displayName ?? "").toLowerCase().includes(myCirclesFilter) ||
+          p.username.toLowerCase().includes(myCirclesFilter),
+      )
+    : [];
 
-    setDiscoverResults("loading");
-    search(q)
-      .then((res) => setDiscoverResults(res.groups))
-      .catch(() => setDiscoverResults([]));
-
-    setRemoteJoinState("idle");
-    if (HANDLE_PATTERN.test(q)) {
-      setRemoteGroup("loading");
-      lookupRemoteGroup(q)
-        .then(setRemoteGroup)
-        .catch(() => setRemoteGroup(null));
-    } else {
-      setRemoteGroup(null);
-    }
-  }, [query]);
-
-
-  const joinedIds = new Set(Array.isArray(myGroups) ? myGroups.map((c) => c.id) : []);
-  const remoteAlreadyJoined =
-    typeof remoteGroup === "object" &&
-    remoteGroup !== null &&
-    Array.isArray(myGroups) &&
-    myGroups.some((g) => g.actor.username === remoteGroup.username && g.actor.domain === remoteGroup.domain);
+  const exploreFilter = exploreQuery.trim().toLowerCase();
+  const filteredExploreServers = Array.isArray(exploreServers)
+    ? exploreServers.filter(
+        (s) =>
+          !exploreFilter ||
+          s.domain.toLowerCase().includes(exploreFilter) ||
+          (s.name ?? "").toLowerCase().includes(exploreFilter),
+      )
+    : exploreServers;
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -151,26 +142,6 @@ export default function GroupsPage() {
     }
   }
 
-  async function handleJoin(community: Community) {
-    if (!me) {
-      window.location.href = "/login";
-      return;
-    }
-    setJoining(community.id);
-    try {
-      const result = await joinCommunity(community.id);
-      if (result.state === "accepted") {
-        setMyGroups((prev) => (Array.isArray(prev) ? [...prev, community] : prev));
-      } else {
-        setPendingRequests((prev) => new Set(prev).add(community.id));
-      }
-    } catch {
-      // already a member/pending — nothing useful to show inline here
-    } finally {
-      setJoining(null);
-    }
-  }
-
   async function handleLeave(community: Community) {
     if (!me) return;
     setJoining(community.id);
@@ -179,6 +150,16 @@ export default function GroupsPage() {
       setMyGroups((prev) => (Array.isArray(prev) ? prev.filter((c) => c.id !== community.id) : prev));
     } finally {
       setJoining(null);
+    }
+  }
+
+  async function handleUnlisten(person: FollowSummary) {
+    setUnlistening(person.id);
+    try {
+      await unfollow(person.id);
+      setFollowing((prev) => (Array.isArray(prev) ? prev.filter((p) => p.id !== person.id) : prev));
+    } finally {
+      setUnlistening(null);
     }
   }
 
@@ -209,25 +190,6 @@ export default function GroupsPage() {
     }
   }
 
-  async function handleJoinRemoteGroup() {
-    setRemoteJoinState("joining");
-    try {
-      await joinRemoteGroup(query.trim());
-      setRemoteJoinState("requested");
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        window.location.href = "/login";
-        return;
-      }
-      setRemoteJoinState("error");
-    }
-  }
-
-  function groupStatus(c: Community): "accepted" | "pending" | null {
-    if (joinedIds.has(c.id)) return "accepted";
-    if (pendingRequests.has(c.id)) return "pending";
-    return null;
-  }
 
   return (
     <main className="page">
@@ -285,22 +247,10 @@ export default function GroupsPage() {
 
       <div className="circle-tabs" style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", margin: "1rem 0" }}>
         <button
-          className={`btn ${tab === "discover" ? "btn-primary" : "btn-ghost"}`}
-          onClick={() => setTab("discover")}
-        >
-          Discover
-        </button>
-        <button
           className={`btn ${tab === "mine" ? "btn-primary" : "btn-ghost"}`}
           onClick={() => setTab("mine")}
         >
           My Circles
-        </button>
-        <button
-          className={`btn ${tab === "explore" ? "btn-primary" : "btn-ghost"}`}
-          onClick={() => setTab("explore")}
-        >
-          Explore
         </button>
         <button
           className={`btn ${tab === "watching" ? "btn-primary" : "btn-ghost"}`}
@@ -308,118 +258,13 @@ export default function GroupsPage() {
         >
           Watching
         </button>
+        <button
+          className={`btn ${tab === "explore" ? "btn-primary" : "btn-ghost"}`}
+          onClick={() => setTab("explore")}
+        >
+          Explore
+        </button>
       </div>
-
-      {tab === "discover" && (
-        <>
-          <input
-            className="input"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search circles, or enter a fediverse handle (circle@domain)"
-            style={{ width: "100%", marginBottom: "1rem" }}
-          />
-
-          {remoteGroup === "loading" ? (
-            <p className="text-faint">Looking up {query.trim()} on the fediverse…</p>
-          ) : remoteGroup ? (
-            <div
-              className="card"
-              style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <strong>{remoteGroup.title}</strong>
-                <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
-                  @{remoteGroup.username}@{remoteGroup.domain}
-                </p>
-                {remoteGroup.description && (
-                  <RenderedDescription
-                    html={remoteGroup.description}
-                    style={{ marginTop: "0.3rem" }}
-                    collapsedHeight={96}
-                  />
-                )}
-              </div>
-              {remoteAlreadyJoined ? (
-                <span className="text-faint">✓ Joined</span>
-              ) : remoteJoinState === "requested" ? (
-                <span className="text-faint">Request sent</span>
-              ) : (
-                <button
-                  className="btn btn-primary"
-                  disabled={remoteJoinState === "joining"}
-                  onClick={handleJoinRemoteGroup}
-                >
-                  {remoteJoinState === "joining" ? "…" : "Join"}
-                </button>
-              )}
-              {remoteJoinState === "error" && <p className="error-text">Couldn&apos;t send that request.</p>}
-            </div>
-          ) : null}
-
-          {discoverResults === "loading" ? (
-            <p className="text-dim">Loading…</p>
-          ) : discoverResults.length === 0 ? (
-            <p className="text-dim">{query.trim() ? "No circles found." : "No circles yet."}</p>
-          ) : (
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {discoverResults.map((c) => {
-                const status = groupStatus(c);
-                return (
-                  <li key={c.id} className="card">
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "flex-start",
-                        gap: "1rem",
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <Link
-                          href={`/g/${c.actor.username}`}
-                          style={{ fontWeight: 700, fontSize: "1.05rem", color: "var(--text)" }}
-                        >
-                          {c.title}
-                        </Link>
-                        {c.privacy !== "public" && (
-                          <span className="pill" style={{ marginLeft: "0.5rem" }}>
-                            {GROUP_PRIVACY_LABELS[c.privacy]}
-                          </span>
-                        )}
-                        <p className="text-faint" style={{ margin: "0.2rem 0" }}>
-                          c/{c.actor.username} · {c.memberCount} member{c.memberCount === 1 ? "" : "s"}
-                        </p>
-                        {c.description && (
-                          <p
-                            style={{
-                              margin: 0,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {descriptionTeaser(c.description)}
-                          </p>
-                        )}
-                      </div>
-                      {status === "accepted" ? (
-                        <span className="text-faint">✓ Joined</span>
-                      ) : status === "pending" ? (
-                        <span className="text-faint">Requested</span>
-                      ) : (
-                        <button className="btn btn-ghost" disabled={joining === c.id} onClick={() => handleJoin(c)}>
-                          {c.privacy === "public" ? "Join" : "Request to join"}
-                        </button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </>
-      )}
 
       {tab === "mine" && !me && (
         <p className="text-dim">
@@ -429,13 +274,26 @@ export default function GroupsPage() {
 
       {tab === "mine" && me && (
         <>
+          <input
+            className="input"
+            value={myCirclesQuery}
+            onChange={(e) => setMyCirclesQuery(e.target.value)}
+            placeholder="Search your circles and the people you're listening to"
+            style={{ width: "100%", marginBottom: "1rem" }}
+          />
+
+          <h2 style={{ fontSize: "1.1rem" }}>Circles</h2>
           {myGroups === "loading" ? (
             <p className="text-dim">Loading…</p>
-          ) : myGroups.length === 0 ? (
-            <p className="text-dim">You haven&apos;t joined any circles yet — try Discover.</p>
+          ) : filteredMyGroups.length === 0 ? (
+            <p className="text-dim">
+              {myGroups.length === 0
+                ? "You haven't joined any circles yet — try Search."
+                : "No circles match that search."}
+            </p>
           ) : (
             <ul style={{ listStyle: "none", padding: 0, margin: 0, marginBottom: "1rem" }}>
-              {myGroups.map((c) => (
+              {filteredMyGroups.map((c) => (
                 <li key={c.id} className="card">
                   <div
                     style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "1rem" }}
@@ -453,6 +311,53 @@ export default function GroupsPage() {
                     </div>
                     <button className="btn btn-ghost" disabled={joining === c.id} onClick={() => handleLeave(c)}>
                       Leave
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <h2 style={{ fontSize: "1.1rem" }}>People you&apos;re listening to</h2>
+          {following === "loading" ? (
+            <p className="text-dim">Loading…</p>
+          ) : filteredFollowing.length === 0 ? (
+            <p className="text-dim">
+              {following.length === 0
+                ? "You aren't listening to anyone yet — try Search."
+                : "No one matches that search."}
+            </p>
+          ) : (
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, marginBottom: "1rem" }}>
+              {filteredFollowing.map((p) => (
+                <li key={p.id} className="card">
+                  <div
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}
+                  >
+                    <Link
+                      href={`/u/${p.username}?domain=${encodeURIComponent(p.domain)}`}
+                      style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: 0, color: "inherit" }}
+                    >
+                      <Avatar
+                        name={p.displayName ?? p.username}
+                        size={40}
+                        imageUrl={p.avatarImageUrl}
+                        preset={p.avatarPreset}
+                      />
+                      <div style={{ minWidth: 0 }}>
+                        <strong>{p.displayName ?? p.username}</strong>
+                        <p className="text-faint" style={{ margin: 0 }}>
+                          @{p.username}@{p.domain}
+                        </p>
+                      </div>
+                    </Link>
+                    <button
+                      className="btn btn-ghost"
+                      disabled={unlistening === p.id}
+                      onClick={() => handleUnlisten(p)}
+                      style={{ flexShrink: 0 }}
+                    >
+                      Unlisten
                     </button>
                   </div>
                 </li>
@@ -490,12 +395,12 @@ export default function GroupsPage() {
 
       {tab === "explore" && (
         <>
-          <p className="text-dim" style={{ marginTop: 0 }}>
-            Browse trending and public posts from other servers — a live look at each server's own
+          <PageInfo title="Explore" level="h2">
+            Browse trending and public posts from other servers — a live look at each server&apos;s own
             feed, not something federated into Gibrr. Clicking a post pulls it in so you can Echo,
-            React, or Chatter on it like any other Gib. Subscribing merges a server's trending
+            React, or Chatter on it like any other Gib. Subscribing merges a server&apos;s trending
             posts into your own Home feed going forward.
-          </p>
+          </PageInfo>
 
           {exploreServers === "loading" && <p className="text-dim">Loading…</p>}
           {exploreServers === "error" && <p className="error-text">Could not load the server list.</p>}
@@ -503,25 +408,41 @@ export default function GroupsPage() {
             <p className="text-dim">No servers added yet — ask your Host to add one.</p>
           )}
           {Array.isArray(exploreServers) && exploreServers.length > 0 && (
+            <input
+              className="input"
+              value={exploreQuery}
+              onChange={(e) => setExploreQuery(e.target.value)}
+              placeholder="Search servers"
+              style={{ width: "100%", marginBottom: "1rem" }}
+            />
+          )}
+          {Array.isArray(exploreServers) && exploreServers.length > 0 && filteredExploreServers.length === 0 && (
+            <p className="text-dim">No servers match that search.</p>
+          )}
+          {Array.isArray(filteredExploreServers) && filteredExploreServers.length > 0 && (
             <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>
-              {exploreServers.map((server) => (
+              {filteredExploreServers.map((server) => (
                 <li
                   key={server.domain}
                   className="card"
                   style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}
                 >
-                  <div>
-                    <Link href={`/explore/${encodeURIComponent(server.domain)}`} style={{ fontWeight: 600 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Link
+                      href={`/explore/${encodeURIComponent(server.domain)}`}
+                      style={{ fontWeight: 600, overflowWrap: "anywhere" }}
+                    >
                       {server.name || server.domain}
                     </Link>
                     {server.name && (
-                      <p className="text-faint" style={{ margin: "0.2rem 0 0" }}>
+                      <p className="text-faint" style={{ margin: "0.2rem 0 0", overflowWrap: "anywhere" }}>
                         {server.domain}
                       </p>
                     )}
                   </div>
                   <button
                     className={`btn ${server.subscribed ? "btn-ghost" : "btn-primary"}`}
+                    style={{ flexShrink: 0 }}
                     disabled={subscribingDomain === server.domain}
                     onClick={() => handleToggleSubscribe(server)}
                   >
@@ -543,7 +464,12 @@ export default function GroupsPage() {
           <a href="/login">Log in</a> to set up saved keyword/author watches.
         </p>
       )}
-      {tab === "watching" && me && <AntennasTab />}
+      {tab === "watching" && me && (
+        <>
+          <AntennasTab />
+          <RssFeedsTab />
+        </>
+      )}
     </main>
   );
 }

@@ -66,6 +66,18 @@ export default function ProfilePage() {
     const requested = new URLSearchParams(window.location.search).get("tab");
     if (requested === "bookwyrm") setTab("bookwyrm");
   }, []);
+
+  // `?domain=` disambiguates a remote (or same-named) actor from a local
+  // one of the same username — set by search/circles results so clicking
+  // into someone's profile always lands on this in-app page instead of
+  // linking out. Read the same way `tab` is above (a plain useEffect, not
+  // useSearchParams) to avoid a Suspense boundary for one query param;
+  // `undefined` means "not read yet" so the fetch effect below can wait
+  // for it instead of firing once with no domain and again right after.
+  const [domain, setDomain] = useState<string | undefined | null>(undefined);
+  useEffect(() => {
+    setDomain(new URLSearchParams(window.location.search).get("domain") ?? null);
+  }, []);
   const [messaging, setMessaging] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [events, setEvents] = useState<CalendarEvent[] | "loading" | "hidden" | "unavailable">(
@@ -118,7 +130,7 @@ export default function ProfilePage() {
   }, [tabMenuOpen]);
 
   function refreshProfile() {
-    return getProfile(username)
+    return getProfile(username, undefined, domain ?? undefined)
       .then(setProfile)
       .catch(() => setProfile("error"));
   }
@@ -129,7 +141,7 @@ export default function ProfilePage() {
     if (profile === "loading" || profile === "error" || !profile.nextCursor) return;
     setLoadingMorePosts(true);
     try {
-      const res = await getProfile(username, profile.nextCursor);
+      const res = await getProfile(username, profile.nextCursor, domain ?? undefined);
       // Only posts/nextCursor come from the paginated page — everything
       // else in the response (actor, counts, comments, memo) is just
       // whatever's currently true, not specific to this page of posts,
@@ -178,10 +190,16 @@ export default function ProfilePage() {
   }
 
   async function handleMessage() {
+    if (profile === "loading" || profile === "error") return;
     setMessaging(true);
     setMessageError(null);
     try {
-      const conversation = await startConversation(username);
+      // A bare username is assumed local by POST /conversations (same
+      // convention as @mentions) — this profile can now be a remote
+      // actor's, so a plain `username` here would resolve to a
+      // same-named *local* account instead, or 404 if there is none.
+      const handle = `${username}@${profile.actor.domain}`;
+      const conversation = await startConversation(handle);
       openChatDock({ conversationId: conversation.id, otherActor: conversation.otherActor });
       setMessaging(false);
     } catch (err) {
@@ -195,14 +213,15 @@ export default function ProfilePage() {
   }
 
   useEffect(() => {
-    getProfile(username)
+    if (domain === undefined) return;
+    getProfile(username, undefined, domain ?? undefined)
       .then(setProfile)
       .catch(() => setProfile("error"));
     getMe()
       .then(setMe)
       .catch(() => setMe(null));
     setEvents("hidden");
-  }, [username]);
+  }, [username, domain]);
 
   useEffect(() => {
     if (tab !== "calendar" || events !== "hidden") return;
@@ -221,7 +240,8 @@ export default function ProfilePage() {
   if (profile === "loading") return <main className="page">Loading…</main>;
   if (profile === "error") return <main className="page">Could not load this profile.</main>;
 
-  const isOwnProfile = me?.actor.username === profile.actor.username;
+  const isOwnProfile =
+    me?.actor.username === profile.actor.username && me?.actor.domain === profile.actor.domain;
   const displayLabel = profile.actor.displayName ?? profile.actor.username;
 
   // Backs both the desktop .tabs strip and the mobile "⋮" dropdown
@@ -457,7 +477,7 @@ export default function ProfilePage() {
               a circle). Zero-sized, so it's invisible on desktop where it
               doesn't force anything. */}
           <div className="profile-row-break" />
-          <div className="profile-name-block" style={{ flex: 1, paddingTop: "0.6rem" }}>
+          <div className="profile-name-block" style={{ flex: 1 }}>
             <h1 style={{ margin: 0, fontSize: "1.7rem" }}>
               {displayLabel}
               {profile.actor.pronouns && (
@@ -470,8 +490,18 @@ export default function ProfilePage() {
               @{profile.actor.username}@{profile.actor.domain}
             </p>
           </div>
+          {/* Same forced-wrap trick as the one after the avatar above —
+              on mobile this pushes the actions column (Settings/Log out,
+              or Follow/Whisper/etc.) onto its own row below the name
+              instead of sitting beside it. Side-by-side used to be the
+              mobile layout on purpose (see profile-owner-actions' own
+              comment in globals.css), but a long display name + a long
+              @user@domain handle squeezed into whatever width was left
+              next to the buttons wrapped mid-word — giving the name its
+              own full-width row fixes that regardless of how long it is. */}
+          <div className="profile-row-break" />
           {isOwnProfile && (
-            <div className="profile-owner-actions" style={{ display: "flex", gap: "0.5rem", paddingTop: "0.6rem" }}>
+            <div className="profile-owner-actions profile-actions-block" style={{ display: "flex", gap: "0.5rem" }}>
               <Link href="/settings" className="btn btn-ghost">
                 Settings
               </Link>
@@ -482,9 +512,13 @@ export default function ProfilePage() {
             </div>
           )}
           {me && !isOwnProfile && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", paddingTop: "0.6rem" }}>
+            <div className="profile-actions-block" style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                <FriendButton username={username} />
+                {/* Friendship (mutual, request/accept) isn't a federated
+                    concept here — GET /friends/status/:username looks up
+                    by bare username only, so it's kept to same-instance
+                    profiles until that's made domain-aware too. */}
+                {me?.actor.domain === profile.actor.domain && <FriendButton username={username} />}
                 <FollowButton username={username} domain={profile.actor.domain} actorId={profile.actor.id} />
                 <BlockButton username={username} domain={profile.actor.domain} actorId={profile.actor.id} />
                 <ReportButton targetType="actor" targetId={profile.actor.id} />

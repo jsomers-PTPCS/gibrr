@@ -126,12 +126,15 @@ export interface Post {
   // null for anything authored locally. Rides along on every Post
   // response; used here just to decide whether to show the section below.
   remoteId: string | null;
-  // The origin server's own real like/share counts, fetched live — only
-  // present on the GET /posts/:id response (routes/posts.ts), never on a
-  // feed/list entry (too expensive per-item there). Null fields mean the
-  // origin didn't report that number; the whole value is null for a local
-  // post or when the live fetch fails.
-  remoteEngagement?: { likes: number | null; shares: number | null } | null;
+  // The origin server's own real like/share/comment counts. Usually only
+  // present on the GET /posts/:id response (routes/posts.ts) via a live
+  // fetch — too expensive per-item on a feed/list — except on the Loops
+  // feed (GET /explore/loops/feed), where every item's origin server
+  // already reports these inline in the same response that lists the
+  // videos, so it costs nothing extra to include there too. Null fields
+  // mean the origin didn't report that number; the whole value is null
+  // for a local post or when a live fetch fails.
+  remoteEngagement?: { likes: number | null; shares: number | null; comments?: number | null } | null;
 }
 
 export interface PollOptionResult {
@@ -297,21 +300,6 @@ export function disableTwoFactor(password: string) {
   return apiFetch<void>("/auth/2fa/disable", { method: "POST", body: JSON.stringify({ password }) });
 }
 
-export function verifyEmail(token: string) {
-  return apiFetch<void>("/auth/verify-email", { method: "POST", body: JSON.stringify({ token }) });
-}
-
-export function resendVerification() {
-  return apiFetch<void>("/auth/resend-verification", { method: "POST" });
-}
-
-export function forgotPassword(email: string) {
-  return apiFetch<{ ok: true }>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
-}
-
-export function resetPassword(token: string, password: string) {
-  return apiFetch<void>("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) });
-}
 
 // First-run setup — registers the instance's first (admin) account.
 // Only succeeds while zero LocalUser rows exist; the backend 409s after
@@ -332,25 +320,41 @@ export function completeSetup(input: { username: string; email: string; password
 // URL) instead of just the viewer's own follow graph — see
 // routes/posts.ts's GET /feed for why this is a separate scope, not the
 // default.
+export type FeedSort = "new" | "top" | "rising" | "active" | "comments";
+export type FeedRange = "day" | "week" | "month" | "all";
+
 export function getFeed(
   cursor?: string,
   scope?: "federated",
-  filters?: { domain?: string; q?: string },
+  filters?: {
+    domains?: string[];
+    q?: string;
+    sort?: FeedSort;
+    range?: FeedRange;
+    communityIds?: string[];
+  },
 ) {
   const params = new URLSearchParams();
   if (cursor) params.set("cursor", cursor);
   if (scope) params.set("scope", scope);
-  if (filters?.domain) params.set("domain", filters.domain);
+  if (filters?.domains && filters.domains.length > 0) params.set("domain", filters.domains.join(","));
   if (filters?.q) params.set("q", filters.q);
+  if (filters?.sort && filters.sort !== "new") params.set("sort", filters.sort);
+  if (filters?.range && filters.range !== "all") params.set("range", filters.range);
+  if (filters?.communityIds && filters.communityIds.length > 0) {
+    params.set("communityIds", filters.communityIds.join(","));
+  }
   const query = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<FeedResponse>(`/feed${query}`);
 }
 
-// Populates the Federated tab's domain filter dropdown — ignored
-// (server-side) outside federated scope, so there's no equivalent for
-// Home.
-export function getFederatedDomains() {
-  return apiFetch<string[]>("/feed/federated-domains");
+// Populates the server filter dropdown on Home/Federated — pass
+// "federated" for that tab's own (broader) domain list, omit it for
+// Home's (narrower, scoped to whatever's actually visible to the
+// viewer there).
+export function getFederatedDomains(scope?: "federated") {
+  const query = scope ? `?scope=${scope}` : "";
+  return apiFetch<string[]>(`/feed/federated-domains${query}`);
 }
 
 // Local hashtag browse — app/tag/[name]/page.tsx.
@@ -628,8 +632,71 @@ export function getAntennaPosts(id: string) {
   return apiFetch<{ antenna: Antenna; posts: Post[] }>(`/antennas/${encodeURIComponent(id)}/posts`);
 }
 
-export function getComments(postId: string) {
-  return apiFetch<Comment[]>(`/posts/${encodeURIComponent(postId)}/comments`);
+// A listened-to RSS/Atom feed (Reddit's own per-subreddit .rss included)
+// — its items merge into Home like any other subscribed source once
+// federation/rssFeeds.ts's sweep catches them, same as Explore server
+// subscriptions do. See routes/rss.ts.
+export interface RssSubscription {
+  id: string;
+  feedId: string;
+  url: string;
+  title: string | null;
+}
+
+export function getRssSubscriptions() {
+  return apiFetch<RssSubscription[]>("/rss/subscriptions");
+}
+
+export function addRssSubscription(url: string) {
+  return apiFetch<RssSubscription>("/rss/subscriptions", { method: "POST", body: JSON.stringify({ url }) });
+}
+
+export function removeRssSubscription(id: string) {
+  return apiFetch<void>(`/rss/subscriptions/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Self-hosted-only (federation/translate.ts) — an empty language list
+// means the Host hasn't set up LIBRETRANSLATE_URL, or it's still
+// downloading its language models; either way, the frontend just hides
+// the Translate button rather than treating it as an error.
+export interface TranslateLanguage {
+  code: string;
+  name: string;
+}
+
+export function getTranslateLanguages() {
+  return apiFetch<TranslateLanguage[]>("/translate/languages");
+}
+
+// PostItem renders once per post in a feed — without this, each one
+// would independently fetch the same rarely-changing language list.
+// Collapses concurrent callers onto a single in-flight request and
+// caches the result for the lifetime of the page; failures (including
+// "not logged in") resolve to an empty list rather than rejecting, so a
+// misconfigured/unavailable instance just hides every Translate button
+// instead of erroring on every post.
+let translateLanguagesPromise: Promise<TranslateLanguage[]> | null = null;
+export function getTranslateLanguagesCached(): Promise<TranslateLanguage[]> {
+  if (!translateLanguagesPromise) {
+    translateLanguagesPromise = getTranslateLanguages().catch(() => []);
+  }
+  return translateLanguagesPromise;
+}
+
+export function translateText(text: string, target: string) {
+  return apiFetch<{ translatedText: string }>("/translate", {
+    method: "POST",
+    body: JSON.stringify({ text, target }),
+  });
+}
+
+// `sync: false` skips the server's own live reply-sync (routes/comments.ts)
+// and just returns whatever's already cached — for an instant first
+// paint; PostComments.tsx follows up with a normal (synced) call right
+// after to pick up anything new.
+export function getComments(postId: string, options?: { sync?: boolean }) {
+  const query = options?.sync === false ? "?sync=0" : "";
+  return apiFetch<Comment[]>(`/posts/${encodeURIComponent(postId)}/comments${query}`);
 }
 
 export function createComment(postId: string, input: { body: string; parentId?: string }) {
@@ -646,8 +713,17 @@ export function voteComment(id: string, value: VoteValue) {
   );
 }
 
-export function getProfile(username: string, cursor?: string) {
-  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+// `domain` disambiguates a remote actor from a same-named local one (and
+// from any other server's same-named actor) — omit it for a local
+// profile, same as before this param existed. Given for a remote actor
+// not yet cached locally, the API resolves and caches them on the fly so
+// their in-app profile (bio, avatar, whatever of their posts we already
+// know about) can render instead of a dead end.
+export function getProfile(username: string, cursor?: string, domain?: string) {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  if (domain) params.set("domain", domain);
+  const query = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<Profile>(`/profile/${encodeURIComponent(username)}${query}`);
 }
 
@@ -906,9 +982,9 @@ export function getSentFriendRequests() {
 }
 
 // Fediverse follow graph — separate from Friendship (mutual, local-feel)
-// and CommunityMembership: one-directional, works across instances. A
-// remote actor has no profile page in this app yet, so these summaries
-// are rendered as plain rows, not links — see FollowPanel.tsx.
+// and CommunityMembership: one-directional, works across instances. See
+// FollowPanel.tsx for how these render, local or remote alike, as links
+// to their in-app profile (/u/{username}?domain={domain}).
 export interface FollowSummary {
   id: string;
   username: string;
@@ -921,8 +997,9 @@ export interface FollowSummary {
 
 export type FollowStatus = "self" | "none" | "pending" | "accepted";
 
-export function getFollowStatus(username: string) {
-  return apiFetch<{ status: FollowStatus }>(`/follows/status/${encodeURIComponent(username)}`);
+export function getFollowStatus(username: string, domain?: string) {
+  const query = domain ? `?domain=${encodeURIComponent(domain)}` : "";
+  return apiFetch<{ status: FollowStatus }>(`/follows/status/${encodeURIComponent(username)}${query}`);
 }
 
 // A live lookup of a handle typed into the follow box — not a fuzzy
@@ -935,12 +1012,14 @@ export interface FollowPreview {
   displayName: string | null;
   avatarImageUrl: string | null;
   avatarPreset: AvatarPresetKey | null;
+  // Whether the viewer already follows (or has a pending follow on)
+  // this person — "none" for anyone not yet cached locally, since a
+  // Follow row can't exist for an actor we've never touched.
+  status: "none" | "pending" | "accepted";
   // Null for a local actor (use /u/{username} instead) — set for a
-  // remote one to their real AP object IRI, which real fediverse
-  // software also answers as an HTML profile page for a plain browser
-  // request (no Accept: activity+json), same as Post.remoteId already
-  // doubles as a "view original" link. The only way to actually browse
-  // a remote person's posts, since there's no in-app profile page for one.
+  // remote one to their real AP object IRI, kept as a "view original"
+  // link alongside the in-app profile (/u/{username}?domain={domain}),
+  // not instead of it.
   url: string | null;
 }
 
@@ -1356,6 +1435,9 @@ export interface ExploreServer {
   // publicly reachable one. Never the token itself, see
   // routes/admin.ts's EXPLORE_SERVER_SELECT.
   connected: boolean;
+  // "manual" (typed/pasted into Add server) or "fedidb" (federation/
+  // fedidb.ts's periodic sync added it automatically).
+  source: string;
 }
 
 export function getAdminExploreServers() {
@@ -1383,6 +1465,35 @@ export function startExploreServerOAuth(domain: string, name?: string) {
     method: "POST",
     body: JSON.stringify({ name }),
   });
+}
+
+// federation/fedidb.ts's periodic sync — auto-adds every FediDB-known
+// server above minUserCount as an ExploreServer. Disabled until the
+// Host opts in.
+export interface FediDbSyncStatus {
+  enabled: boolean;
+  minUserCount: number;
+  lastSyncAt: string | null;
+}
+
+export function getFediDbSyncStatus() {
+  return apiFetch<FediDbSyncStatus>("/admin/fedidb-sync");
+}
+
+export function setFediDbSyncSettings(enabled: boolean, minUserCount: number) {
+  return apiFetch<FediDbSyncStatus>("/admin/fedidb-sync", {
+    method: "PUT",
+    body: JSON.stringify({ enabled, minUserCount }),
+  });
+}
+
+// Fire-and-forget on the API side (204, no body — the sync itself runs
+// on) — FediDB has a lot of servers to page through and each new
+// candidate gets a live verification probe, so this can take a while.
+// Poll getFediDbSyncStatus's lastSyncAt to see when it's actually
+// finished.
+export function runFediDbSyncNow() {
+  return apiFetch<void>("/admin/fedidb-sync/run", { method: "POST" });
 }
 
 export function getExploreServers() {
@@ -1426,6 +1537,15 @@ export function getExploreTimeline(domain: string) {
 // getExploreTimeline.
 export function getLoopsFeed() {
   return apiFetch<{ posts: Post[] }>("/explore/loops/feed");
+}
+
+// A live, aggregated long-form article feed across every Host-curated
+// server detected as Ghost software — the Federated page's Longform tab.
+// Same "already-resolved Post" shape as getLoopsFeed, just sourced from
+// blogs instead of video instances; there's no remoteEngagement here
+// since Ghost's own AP objects never carry likes/shares/comments.
+export function getLongformFeed() {
+  return apiFetch<{ posts: Post[] }>("/explore/longform/feed");
 }
 
 // Fediverse discovery links — routes/directoryLinks.ts. Public read

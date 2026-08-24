@@ -1,10 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getFeed, getMe, type Post, type Me } from "../lib/api";
+import {
+  getFeed,
+  getMe,
+  getFederatedDomains,
+  getCommunityMemberships,
+  type Post,
+  type Me,
+  type FeedSort,
+  type FeedRange,
+  type Community,
+} from "../lib/api";
 import { PostItem } from "../components/PostItem";
 import { PostComposer } from "../components/PostComposer";
 import { Avatar } from "../components/Avatar";
+import { FeedFilterBar } from "../components/FeedFilterBar";
 
 export default function HomePage() {
   const [posts, setPosts] = useState<Post[] | "loading" | "error">("loading");
@@ -14,16 +25,43 @@ export default function HomePage() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [title, setTitle] = useState("");
 
+  const [sort, setSort] = useState<FeedSort>("new");
+  const [range, setRange] = useState<FeedRange>("all");
+  const [domains, setDomains] = useState<string[]>([]);
+  const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
+  const [circles, setCircles] = useState<Community[]>([]);
+  const [selectedCircleIds, setSelectedCircleIds] = useState<string[]>([]);
+
   useEffect(() => {
     getMe()
       .then(setMe)
       .catch(() => setMe(null));
-    refreshFeed();
+    getFederatedDomains()
+      .then(setDomains)
+      .catch(() => setDomains([]));
   }, []);
+
+  // The circle picker needs the viewer's own username first (getMe),
+  // unlike domains which don't depend on who's logged in.
+  useEffect(() => {
+    if (!me) return;
+    getCommunityMemberships(me.actor.username)
+      .then(setCircles)
+      .catch(() => setCircles([]));
+  }, [me]);
+
+  useEffect(() => {
+    refreshFeed();
+  }, [sort, range, selectedDomains, selectedCircleIds]);
 
   function refreshFeed() {
     setPosts("loading");
-    return getFeed()
+    return getFeed(undefined, undefined, {
+      sort,
+      range,
+      domains: selectedDomains,
+      communityIds: selectedCircleIds,
+    })
       .then((res) => {
         setPosts(res.posts);
         setNextCursor(res.nextCursor);
@@ -35,7 +73,12 @@ export default function HomePage() {
     if (!nextCursor) return;
     setLoadingMore(true);
     try {
-      const res = await getFeed(nextCursor);
+      const res = await getFeed(nextCursor, undefined, {
+        sort,
+        range,
+        domains: selectedDomains,
+        communityIds: selectedCircleIds,
+      });
       setPosts((prev) => (Array.isArray(prev) ? [...prev, ...res.posts] : prev));
       setNextCursor(res.nextCursor);
     } finally {
@@ -117,9 +160,32 @@ export default function HomePage() {
         </div>
       )}
 
+      <FeedFilterBar
+        sort={sort}
+        onSortChange={setSort}
+        range={range}
+        onRangeChange={setRange}
+        domains={domains}
+        selectedDomains={selectedDomains}
+        onSelectedDomainsChange={setSelectedDomains}
+        circles={circles}
+        selectedCircleIds={selectedCircleIds}
+        onSelectedCircleIdsChange={setSelectedCircleIds}
+      />
+
       {posts === "loading" && <p className="text-dim">Loading conversations…</p>}
       {posts === "error" && <p className="error-text">Could not reach the API.</p>}
-      {Array.isArray(posts) && posts.length === 0 && (
+      {Array.isArray(posts) &&
+        posts.length === 0 &&
+        (sort !== "new" || range !== "all" || selectedDomains.length > 0 || selectedCircleIds.length > 0) && (
+          <p className="text-dim">Nothing matches that filter.</p>
+        )}
+      {Array.isArray(posts) &&
+        posts.length === 0 &&
+        sort === "new" &&
+        range === "all" &&
+        selectedDomains.length === 0 &&
+        selectedCircleIds.length === 0 && (
         <p className="text-dim">
           No Gibs yet.{" "}
           {me ? (

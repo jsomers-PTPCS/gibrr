@@ -18,7 +18,9 @@ import { fetchRemoteActor, upsertRemoteActor } from "../federation/remoteActor.j
 import { searchRelayDirectory } from "../federation/relayDirectory.js";
 import { normalizeDomain } from "../federation/domainBlocks.js";
 import { fetchExploreTimelineForDomain } from "../federation/exploreDispatch.js";
+import { fetchInstanceSoftware } from "../federation/instanceSoftware.js";
 import { registerOAuthApp, buildAuthorizeUrl, exchangeCodeForToken } from "../federation/mastodonOAuth.js";
+import { getFediDbSyncStatus, setFediDbSyncSettings, runFediDbSync } from "../federation/fedidb.js";
 import { webOrigin } from "./auth.js";
 
 // A real hostname shape (labels of letters/digits/hyphens joined by
@@ -405,6 +407,7 @@ const EXPLORE_SERVER_SELECT = {
   name: true,
   createdAt: true,
   oauthAccessToken: true,
+  source: true,
 } as const;
 
 function toPublicExploreServer<T extends { oauthAccessToken: string | null }>(server: T) {
@@ -443,10 +446,14 @@ adminRouter.post("/admin/explore-servers", async (req, res) => {
     });
   }
 
+  // Persisted now rather than left for a feed request to detect live —
+  // see ExploreServer.software's own schema comment for why that matters
+  // at this list's current size.
+  const software = await fetchInstanceSoftware(domain);
   const server = await prisma.exploreServer.upsert({
     where: { domain },
-    create: { domain, name: parsed.data.name },
-    update: { name: parsed.data.name },
+    create: { domain, name: parsed.data.name, software },
+    update: { name: parsed.data.name, software },
     select: EXPLORE_SERVER_SELECT,
   });
   res.status(201).json(toPublicExploreServer(server));
@@ -537,5 +544,38 @@ adminRouter.delete("/admin/explore-servers/:domain", async (req, res) => {
       prisma.exploreServer.delete({ where: { id: server.id } }),
     ]);
   }
+  res.status(204).end();
+});
+
+// Auto-add every FediDB-known server above a user-count threshold as an
+// ExploreServer (source: "fedidb") — federation/fedidb.ts's periodic
+// sync, configured here. Disabled by default; the Host opts in and
+// picks the threshold themselves.
+const fediDbSyncSchema = z.object({
+  enabled: z.boolean(),
+  minUserCount: z.number().int().min(0).max(10_000_000),
+});
+
+adminRouter.get("/admin/fedidb-sync", async (_req, res) => {
+  res.json(await getFediDbSyncStatus());
+});
+
+adminRouter.put("/admin/fedidb-sync", async (req, res) => {
+  const parsed = fediDbSyncSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  await setFediDbSyncSettings(parsed.data.enabled, parsed.data.minUserCount);
+  res.json(await getFediDbSyncStatus());
+});
+
+// Runs one sync immediately rather than waiting for the next scheduled
+// tick (federation/fedidb.ts's own 24h interval) — same "don't make
+// them wait" reasoning as an Explore subscribe's on-demand sweep.
+// Fire-and-forget: FediDB has a lot of servers to page through and each
+// new candidate gets a live verification probe, so this can take a
+// while — the response doesn't block on it finishing. 204, not 202: an
+// empty body either way, but the frontend's apiFetch only special-cases
+// 204 to skip JSON-parsing a response that has nothing to parse.
+adminRouter.post("/admin/fedidb-sync/run", async (_req, res) => {
+  void runFediDbSync(true);
   res.status(204).end();
 });

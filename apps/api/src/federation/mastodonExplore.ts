@@ -28,6 +28,11 @@ export interface ExploreStatus {
   // step reads this directly instead of doing a second AP dereference
   // the way every other fetcher's results do.
   funkwhaleTrack?: { listenUrl: string };
+  // Set only by loopsExplore.ts — the origin server's own like/comment
+  // totals, which the cached copy's real Post row has no way to know
+  // (a fresh cache starts at zero local votes/comments). Undefined for
+  // every other fetcher, whose list responses don't carry these.
+  remoteCounts?: { likes: number; comments: number };
 }
 
 interface MastodonAccount {
@@ -106,4 +111,46 @@ export async function fetchExploreTimeline(
     if (converted) results.push(converted);
   }
   return results;
+}
+
+// A specific account's own recent posts — unlike fetchExploreTimeline
+// above (deliberately "what's hot right now" instance-wide, for the
+// Explore page), this is what routes/profile.ts's backfill actually
+// needs: trending/local-timeline sampling would only catch a given
+// person's posts by luck (confirmed live: an arbitrary account is
+// essentially never in either). Two real, public, unauthenticated
+// Mastodon REST calls — acct->id lookup, then that id's statuses —
+// same API surface every Mastodon-compatible server (Pleroma, Akkoma,
+// Friendica, GoToSocial) already answers.
+export async function fetchMastodonAccountStatuses(
+  domain: string,
+  username: string,
+  limit = 20,
+): Promise<ExploreStatus[] | null> {
+  if (await isDomainBlocked(domain)) return null;
+
+  const origin = `${schemeFor(domain)}://${domain}`;
+  try {
+    const lookupRes = await fetch(`${origin}/api/v1/accounts/lookup?acct=${encodeURIComponent(username)}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!lookupRes.ok) return null;
+    const account = (await lookupRes.json()) as { id?: unknown };
+    if (typeof account.id !== "string" && typeof account.id !== "number") return null;
+
+    const statuses = await fetchStatuses(
+      `${origin}/api/v1/accounts/${account.id}/statuses?limit=${limit}&exclude_replies=true`,
+    );
+    if (!statuses) return null;
+
+    const results: ExploreStatus[] = [];
+    for (const status of statuses) {
+      const converted = toExploreStatus(status);
+      if (converted) results.push(converted);
+    }
+    return results;
+  } catch (err) {
+    logger.warn({ err, domain, username }, "mastodon account statuses fetch failed");
+    return null;
+  }
 }

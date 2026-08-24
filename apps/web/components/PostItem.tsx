@@ -19,6 +19,8 @@ import {
   removeReaction,
   getCustomEmoji,
   votePoll,
+  getTranslateLanguagesCached,
+  translateText,
   ApiError,
   API_URL,
   type Post,
@@ -26,7 +28,9 @@ import {
   type ReactionSummary,
   type CustomEmoji,
   type Poll,
+  type TranslateLanguage,
 } from "../lib/api";
+import { getPreferredTranslateTarget, setPreferredTranslateTarget } from "../lib/translatePreference";
 
 // A small, fixed picker set — not exhaustive, just the common ones.
 // Custom emoji (fetched lazily when the picker opens) round it out.
@@ -42,7 +46,7 @@ import { PostComments } from "./PostComments";
 import { LinkifiedText } from "./LinkifiedText";
 import { ReportButton } from "./ReportButton";
 import { useConfirm } from "./ConfirmDialog";
-import { BoostIcon, BookmarkIcon, CommentIcon, EditIcon, TrashIcon, FlagIcon } from "./icons";
+import { BoostIcon, BookmarkIcon, CommentIcon, EditIcon, TrashIcon, FlagIcon, TranslateIcon } from "./icons";
 import { timeAgoLong } from "../lib/timeAgo";
 
 // A remote actor's avatar/header is already an absolute URL (federated
@@ -87,6 +91,22 @@ export function PostItem({
   const [isAdmin, setIsAdmin] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
+
+  // "Translate this" — self-hosted-only (federation/translate.ts on the
+  // API side), so translateLanguages stays [] on any instance that
+  // hasn't set it up, hiding the button entirely rather than offering
+  // something that'll just 503. Not tied to editing/content state above:
+  // translation is a read-only, per-viewer overlay on what's already
+  // rendered, never something that touches the real post.
+  const [translateLanguages, setTranslateLanguages] = useState<TranslateLanguage[]>([]);
+  const [translateTarget, setTranslateTarget] = useState(getPreferredTranslateTarget());
+  const [translated, setTranslated] = useState<{ title: string | null; body: string | null } | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getTranslateLanguagesCached().then(setTranslateLanguages);
+  }, []);
 
   // The editable content fields, held separately from the rest of `post`
   // so a successful edit can update what's on screen without needing the
@@ -380,6 +400,46 @@ export function PostItem({
     }
   }
 
+  async function runTranslate(target: string) {
+    setTranslating(true);
+    setTranslateError(null);
+    try {
+      const [translatedTitle, translatedBody] = await Promise.all([
+        content.title ? translateText(content.title, target) : Promise.resolve(null),
+        content.body ? translateText(content.body, target) : Promise.resolve(null),
+      ]);
+      setTranslated({
+        title: translatedTitle?.translatedText ?? null,
+        body: translatedBody?.translatedText ?? null,
+      });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      setTranslateError("Couldn't translate this — try again in a moment.");
+    } finally {
+      setTranslating(false);
+    }
+  }
+
+  function handleTranslateClick() {
+    if (translated) {
+      setTranslated(null);
+      setTranslateError(null);
+      return;
+    }
+    runTranslate(translateTarget);
+  }
+
+  function handleTranslateTargetChange(target: string) {
+    setTranslateTarget(target);
+    setPreferredTranslateTarget(target);
+    // Already showing a translation — switching languages should update
+    // it in place rather than silently keep showing the old language.
+    if (translated) runTranslate(target);
+  }
+
   const authorLabel = post.author.displayName ?? post.author.username;
 
   // Renders a reaction's emoji — either a raw unicode character (shown
@@ -552,13 +612,13 @@ export function PostItem({
               <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
                 {content.title &&
                   (detail ? (
-                    <h1 style={{ fontSize: "1.4rem", margin: 0 }}>{content.title}</h1>
+                    <h1 style={{ fontSize: "1.4rem", margin: 0 }}>{translated?.title ?? content.title}</h1>
                   ) : (
                     <Link
                       href={`/posts/${post.id}`}
                       style={{ fontWeight: 700, fontSize: "1.05rem", color: boxStyle?.color ?? "var(--text)" }}
                     >
-                      {content.title}
+                      {translated?.title ?? content.title}
                     </Link>
                   ))}
                 {content.url && (
@@ -616,7 +676,19 @@ export function PostItem({
           <>
             {content.body && (
               <p style={{ color: boxStyle?.color ?? "var(--text-dim)" }}>
-                <LinkifiedText text={content.body} />
+                <LinkifiedText text={translated?.body ?? content.body} />
+              </p>
+            )}
+            {translated && (
+              <p className="text-faint" style={{ fontSize: "0.8rem", margin: "-0.3rem 0 0.5rem" }}>
+                Translated —{" "}
+                <button
+                  type="button"
+                  onClick={() => setTranslated(null)}
+                  style={{ background: "none", border: "none", padding: 0, color: "inherit", textDecoration: "underline", cursor: "pointer" }}
+                >
+                  show original
+                </button>
               </p>
             )}
 
@@ -797,6 +869,33 @@ export function PostItem({
           </div>
         </div>
 
+        {/* The origin server's own real numbers, fetched live by GET /feed
+            and GET /posts/:id — distinct wording from Gibrr's own vote
+            arrows/Echo button (which count only this instance's local
+            activity) so the two are never confused. */}
+        {post.remoteId &&
+          post.remoteEngagement &&
+          (post.remoteEngagement.likes !== null ||
+            post.remoteEngagement.shares !== null ||
+            (post.remoteEngagement.comments ?? null) !== null) && (
+            <p className="text-faint" style={{ margin: 0, fontSize: "0.8rem" }}>
+              {[
+                post.remoteEngagement.likes !== null
+                  ? `${post.remoteEngagement.likes} favourite${post.remoteEngagement.likes === 1 ? "" : "s"}`
+                  : null,
+                post.remoteEngagement.shares !== null
+                  ? `${post.remoteEngagement.shares} boost${post.remoteEngagement.shares === 1 ? "" : "s"}`
+                  : null,
+                (post.remoteEngagement.comments ?? null) !== null
+                  ? `${post.remoteEngagement.comments} comment${post.remoteEngagement.comments === 1 ? "" : "s"}`
+                  : null,
+              ]
+                .filter((part): part is string => part !== null)
+                .join(" · ")}{" "}
+              on {new URL(post.remoteId).host}
+            </p>
+          )}
+
         <div style={{ display: "flex", gap: "0.25rem", alignItems: "center", flexWrap: "wrap" }}>
           <button
             type="button"
@@ -818,6 +917,33 @@ export function PostItem({
           >
             <BookmarkIcon filled={bookmarked} />
           </button>
+          {translateLanguages.length > 0 && content.body && (
+            <>
+              <button
+                type="button"
+                className="btn btn-ghost post-icon-btn"
+                onClick={handleTranslateClick}
+                disabled={translating}
+                title={translated ? "Show original" : "Translate this"}
+                style={translated ? { background: "var(--primary-dim)" } : undefined}
+              >
+                <TranslateIcon />
+              </button>
+              <select
+                className="input"
+                value={translateTarget}
+                onChange={(e) => handleTranslateTargetChange(e.target.value)}
+                title="Translate to"
+                style={{ width: "auto", padding: "0.2rem 0.4rem", fontSize: "0.8rem" }}
+              >
+                {translateLanguages.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           {!detail && (
             <button
               type="button"
@@ -853,6 +979,7 @@ export function PostItem({
           )}
           {!post.canEdit && <ReportButton targetType="post" targetId={post.id} label={<FlagIcon />} iconOnly />}
         </div>
+        {translateError && <p className="error-text" style={{ margin: "0.3rem 0 0", fontSize: "0.85rem" }}>{translateError}</p>}
         {!detail && commentsOpen && (
           <div style={{ marginTop: "0.75rem" }}>
             <PostComments postId={post.id} />

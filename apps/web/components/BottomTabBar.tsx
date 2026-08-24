@@ -7,6 +7,7 @@ import { getMe, getConversations, type Me } from "../lib/api";
 import { toggleChatDockList } from "../lib/chatDock";
 import { HomeIcon, CirclesIcon, LoopsIcon } from "./icons";
 import { MessageIcon } from "./MessageIcon";
+import { Avatar } from "./Avatar";
 
 const POLL_MS = 10000;
 
@@ -50,24 +51,44 @@ export function BottomTabBar() {
   const isHome = pathname === "/";
   const isLoops = pathname.startsWith("/loops");
   const isCircles = pathname.startsWith("/g");
+  const isOwnProfile = me !== null && pathname === `/u/${me.actor.username}`;
+  const ICON_SIZE = 19;
 
   return (
     <nav className="bottom-tab-bar" aria-label="Primary">
       <Link href="/" className={isHome ? "bottom-tab-active" : undefined} aria-label="Home">
-        <HomeIcon width={22} height={22} />
+        <HomeIcon width={ICON_SIZE} height={ICON_SIZE} />
         Home
       </Link>
       <Link href="/loops" className={isLoops ? "bottom-tab-active" : undefined} aria-label="Loops">
-        <LoopsIcon width={22} height={22} />
+        <LoopsIcon width={ICON_SIZE} height={ICON_SIZE} />
         Loops
       </Link>
+      {/* Center tab — the top nav's own profile link
+          (nav-account-profile-link) is hidden on mobile in favor of this
+          one, so this is the only way to reach your own profile there. A
+          logged-out visitor gets sent to /login instead, same fallback
+          Messenger just below already uses. */}
+      <Link
+        href={me ? `/u/${me.actor.username}` : "/login"}
+        className={isOwnProfile ? "bottom-tab-active" : undefined}
+        aria-label="Profile"
+      >
+        <Avatar
+          name={me?.actor.displayName ?? me?.actor.username ?? "?"}
+          size={ICON_SIZE}
+          imageUrl={me?.actor.avatarImageUrl}
+          preset={me?.actor.avatarPreset}
+        />
+        Profile
+      </Link>
       <Link href="/g" className={isCircles ? "bottom-tab-active" : undefined} aria-label="Circles">
-        <CirclesIcon width={22} height={22} />
+        <CirclesIcon width={ICON_SIZE} height={ICON_SIZE} />
         Circles
       </Link>
       <button type="button" onClick={handleMessenger} aria-label="Messages">
         <span style={{ position: "relative", display: "inline-flex" }}>
-          <MessageIcon size={22} />
+          <MessageIcon size={ICON_SIZE} />
           {unread > 0 && <span className="chat-dock-badge">{unread > 9 ? "9+" : unread}</span>}
         </span>
         Messages

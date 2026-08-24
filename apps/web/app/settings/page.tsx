@@ -12,7 +12,6 @@ import {
   regenerateExportLink,
   getBlockedActors,
   unblockActor,
-  resendVerification,
   setupTwoFactor,
   enableTwoFactor,
   disableTwoFactor,
@@ -92,9 +91,6 @@ export default function SettingsPage() {
   const [blockedActors, setBlockedActors] = useState<BlockedActorSummary[] | "loading">("loading");
   const [unblockBusyId, setUnblockBusyId] = useState<string | null>(null);
 
-  const [resendBusy, setResendBusy] = useState(false);
-  const [resendSent, setResendSent] = useState(false);
-
   // Two-factor enrollment is a short-lived wizard, not persisted state
   // — "setup" (QR code showing, not yet enforced) -> enter a code to
   // enable -> backup codes shown exactly once -> done. Disabling only
@@ -109,16 +105,6 @@ export default function SettingsPage() {
   const [twoFactorPassword, setTwoFactorPassword] = useState("");
   const [twoFactorBusy, setTwoFactorBusy] = useState(false);
   const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
-
-  async function handleResendVerification() {
-    setResendBusy(true);
-    try {
-      await resendVerification();
-      setResendSent(true);
-    } finally {
-      setResendBusy(false);
-    }
-  }
 
   useEffect(() => {
     setThemeState(getTheme());
@@ -329,21 +315,6 @@ export default function SettingsPage() {
 
       {tab === "account" && (
       <>
-      {typeof me === "object" && me && !me.emailVerified && (
-        <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}>
-          <p style={{ margin: 0 }}>
-            {resendSent
-              ? "Verification email sent — check your inbox."
-              : "Your email address isn't verified yet."}
-          </p>
-          {!resendSent && (
-            <button className="btn btn-ghost" disabled={resendBusy} onClick={handleResendVerification}>
-              {resendBusy ? "…" : "Resend verification email"}
-            </button>
-          )}
-        </div>
-      )}
-
       <div className="card">
         <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Theme</h2>
         <p className="text-dim" style={{ marginTop: 0 }}>

@@ -150,6 +150,10 @@ button {
    header row — kept as real CSS rules rather than inline so the mobile
    overrides below can actually win the cascade (an inline style always
    beats a stylesheet rule, media query or not). */
+.profile-name-block,
+.profile-actions-block {
+  padding-top: 0.6rem;
+}
 .profile-name-block {
   min-width: 200px;
 }
@@ -175,11 +179,10 @@ button {
     padding-right: 0.85rem;
   }
 
-  /* Circles page's Discover/My Circles/Explore/Watching row (app/g/
-     page.tsx) — at the default .btn size these four don't fit a phone's
-     width, and "Watching" gets clipped off-screen entirely (the row
-     wraps as a backstop, but shrinking first means it usually doesn't
-     need to). */
+  /* Circles page's My Circles/Watching/Explore row (app/g/page.tsx) —
+     at the default .btn size these three don't quite fit a phone's
+     width (the row wraps as a backstop, but shrinking first means it
+     usually doesn't need to). */
   .circle-tabs {
     gap: 0.3rem;
   }
@@ -206,18 +209,28 @@ button {
     font-size: 0.85rem;
   }
 
-  /* Profile header row: avatar + name-block + Settings/Log out normally
-     share one flex row, but the 128px avatar alone eats most of a
-     phone's width, pushing Settings/Log out onto their own line below
-     the name instead of beside it. .profile-row-break forces the wrap
-     onto a new line after the avatar (giving the avatar itself
-     flex-basis: 100% instead stretched its box wide while its height
-     stayed content-sized, turning its border-radius: 50% circle into an
-     oval), freeing the line below for the name and buttons to sit side
-     by side. Bottom padding is trimmed too, so the tab menu sits right
-     under the name/handle instead of leaving a desktop-sized gap. */
+  /* Profile header row: avatar + name-block + Settings/Log out (or
+     Follow/Whisper/etc. for a visitor) normally share one flex row, but
+     the 128px avatar alone eats most of a phone's width. Two
+     .profile-row-break elements (one after the avatar, one after the
+     name-block) force each onto its own line — each one gets
+     flex-basis: 100% (instead of stretching the previous box's own
+     width while its height stayed content-sized, which turned the
+     avatar's border-radius: 50% circle into an oval) — giving the name
+     its own full-width row rather than sharing it with the action
+     buttons: a long display name plus a long @user@domain handle
+     squeezed into whatever width was left next to those buttons used to
+     wrap mid-word regardless of how narrow the buttons themselves were.
+     Bottom padding is trimmed too, so the tab menu sits right under the
+     name/handle instead of leaving a desktop-sized gap. Now that three
+     stacked rows share the header instead of two, each row's own
+     desktop-sized padding-top (there to give breathing room next to the
+     tall avatar when everything shared one row) stacks on top of
+     row-gap between every one of them — tightened here so avatar/name/
+     buttons read as one compact block instead of three loosely related
+     ones. */
   .profile-header-row {
-    row-gap: 0.5rem;
+    row-gap: 0.15rem;
     padding-bottom: 0.25rem;
   }
   .profile-row-break {
@@ -226,20 +239,15 @@ button {
     width: 0;
     height: 0;
   }
+  .profile-name-block,
+  .profile-actions-block {
+    padding-top: 0;
+  }
   .profile-name-block {
     min-width: 0;
   }
   .profile-name-block h1 {
     font-size: 1.35rem;
-  }
-  /* Stacked instead of side-by-side — at the default row layout the two
-     buttons together need as much width as "claudetest" does, which
-     forced the name to wrap mid-word. Stacked, they only need the
-     wider button's width instead of both buttons' combined width. */
-  .profile-owner-actions {
-    flex-direction: column;
-    align-items: stretch;
-    flex-shrink: 0;
   }
 }
 
@@ -390,12 +398,13 @@ select.input:focus {
   flex-shrink: 0;
 }
 
-/* Federated/Circles/search — the links that don't fit a narrow
-   phone screen alongside the logo and account button. Collapses behind
-   .nav-toggle below the breakpoint instead of forcing the whole page to
-   scroll sideways (the actual bug this pair of rules exists to prevent). */
-.nav-toggle {
-  display: none;
+/* Real CSS rule, not Nav.tsx's old inline style — an inline style always
+   wins the cascade over a stylesheet rule regardless of specificity or
+   media query, which was silently defeating this link's own mobile
+   display: none override below (confirmed live: the button kept
+   showing in the top-right corner on mobile despite that rule). */
+.nav-account-profile-link {
+  display: flex;
 }
 
 .nav-loops-icon {
@@ -404,52 +413,71 @@ select.input:focus {
   color: var(--text);
 }
 
+/* Inverse of .nav-loops-icon — hidden on desktop by default (where
+   "Federated" already shows as a plain text link in .nav-links), shown
+   only inside the mobile media query below. */
+.nav-federated-icon {
+  display: none;
+}
+
 @media (max-width: 720px) {
   .nav {
-    flex-wrap: wrap;
-    row-gap: 0.75rem;
-  }
-  .nav-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-left: auto;
-    order: 2;
-  }
-  .nav-links {
-    order: 4;
-    flex-basis: 100%;
-    display: none;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.75rem;
-    padding-top: 0.5rem;
-    border-top: 1px solid var(--border);
-  }
-  .nav-links.nav-links-open {
-    display: flex;
-  }
-
-  /* Loops and Circles both have their own icon in the bottom tab bar on
-     mobile (see .bottom-tab-bar below) — no need for either twice. */
-  .nav-loops-icon,
-  .nav-circles-link {
-    display: none;
-  }
-
-  /* Profile/account moves into the hamburger panel instead of sitting in
-     the top-right corner — shares mobileOpen with .nav-links above so
-     both open/close together (Nav.tsx passes the same state to both). */
-  .nav-account {
-    order: 5;
-    flex-basis: 100%;
-    display: none;
-    flex-direction: column;
-    align-items: stretch;
+    /* No longer wraps to a second row — there used to be a hamburger-
+       collapsed panel that dropped below on open; everything now stays
+       on the header's one row (search takes the center, see .nav-links
+       below), so nothing needs the row-wrap that panel required. */
+    flex-wrap: nowrap;
+    /* Slimmer than the desktop default — a phone screen doesn't have
+       spare vertical space to give a sticky header the same breathing
+       room a desktop one can. */
+    padding: 0.5rem 0.75rem;
     gap: 0.5rem;
   }
-  .nav-account.nav-account-open {
+  .nav-federated-icon {
     display: flex;
+    align-items: center;
+    color: var(--text);
+    order: 3;
+  }
+  /* Federated/Circles text stay hidden here (their own icons cover
+     mobile instead — see .nav-loops-icon etc. just below), leaving only
+     the search form — which becomes this row's centered, flex-growing
+     middle section, not a collapsed panel underneath it. */
+  .nav-links {
+    order: 2;
+    flex: 1;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  /* Loops, Circles, and Federated all have their own icon elsewhere on
+     mobile (Loops/Circles in the bottom tab bar, Federated in the
+     top-right corner just above) — no need for any of them twice. */
+  .nav-loops-icon,
+  .nav-circles-link,
+  .nav-federated-link {
+    display: none;
+  }
+
+  /* nav-spacer's whole job on desktop is pushing nav-account to the far
+     right with its own flex: 1 — on mobile that job now belongs to
+     .nav-links above (centering the search form), so a second flex: 1
+     item here would just compete with it over the same space. */
+  .nav-spacer {
+    display: none;
+  }
+
+  /* The profile link inside (nav-account-profile-link) is hidden below
+     — BottomTabBar.tsx has its own, centered profile tab instead. Log
+     in/Register stay visible: there's no hamburger panel for them to
+     live in anymore, and a logged-out visitor still needs some way to
+     reach them. */
+  .nav-account {
+    order: 4;
+    flex-shrink: 0;
+  }
+  .nav-account-profile-link {
+    display: none;
   }
 }
 
@@ -833,7 +861,7 @@ select.input:focus {
     background: var(--nav-bg);
     backdrop-filter: blur(8px);
     border-top: 1px solid var(--border);
-    padding: 0.4rem 0.5rem calc(0.4rem + env(safe-area-inset-bottom));
+    padding: 0.25rem 0.5rem calc(0.25rem + env(safe-area-inset-bottom));
   }
 
   .bottom-tab-bar a,
@@ -841,13 +869,13 @@ select.input:focus {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.15rem;
+    gap: 0.1rem;
     background: none;
     border: none;
     color: var(--text-dim);
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     font-weight: 600;
-    padding: 0.3rem 0.75rem;
+    padding: 0.2rem 0.6rem;
     cursor: pointer;
   }
 
@@ -856,10 +884,10 @@ select.input:focus {
   }
 
   /* Room for the fixed bottom tab bar so it doesn't cover the last
-     post/card in the page. */
+     post/card in the page — shrunk to match the slimmer bar above. */
   .page,
   .page-wide {
-    padding-bottom: 6rem;
+    padding-bottom: 5.25rem;
   }
 
   /* The bottom tab bar's Messenger icon is the mobile entry point now. */
@@ -870,7 +898,7 @@ select.input:focus {
   .chat-dock-panel {
     left: 0.5rem;
     right: 0.5rem;
-    bottom: calc(4.25rem + env(safe-area-inset-bottom));
+    bottom: calc(3.75rem + env(safe-area-inset-bottom));
     width: auto;
     max-height: calc(100vh - 6rem);
   }
@@ -987,6 +1015,104 @@ select.input:focus {
   .tab-menu-dropdown button.active {
     color: var(--accent);
   }
+}
+
+/* Generic small portaled popover menu — position/top/left set inline from
+   the trigger's measured rect, same reasoning as .tab-menu-dropdown above
+   (avoids getting clipped by an overflow: hidden ancestor, e.g. Loops'
+   ShareMenu sitting inside a video slide). Unlike .tab-menu-dropdown this
+   isn't gated to a mobile media query — it's used at any width. */
+.popover-menu {
+  z-index: 20;
+  min-width: 190px;
+  padding: 0.4rem;
+  display: flex;
+  flex-direction: column;
+}
+.popover-menu button {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-align: left;
+  padding: 0.55rem 0.6rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.popover-menu button:hover {
+  background: var(--surface-hover);
+}
+
+/* FeedFilterBar itself — smaller than the default .input/.btn sizing
+   used everywhere else, since this is a row of several controls
+   sitting above a feed rather than one deliberate action; full-size
+   selects/buttons made the row feel heavier than the content below it.
+   Kept on one line (flex-wrap: nowrap, set inline) rather than wrapping
+   onto a second row on a narrow screen — every direct child is
+   flex-shrink: 0 so a select/button never gets squeezed instead, and
+   the row scrolls horizontally (its own overflow-x, set inline) if it
+   doesn't all fit, same "scroll, don't wrap or clip" choice .tabs below
+   already makes on mobile, just unconditional here rather than
+   media-query-gated since this row's total width varies with how many
+   servers/circles exist, not just viewport width. Scrollbar hidden the
+   same way .tabs hides its own on mobile — a visible one here would
+   read as a stray scrollbar on a row that doesn't look scrollable. */
+.feed-filter-bar select.input,
+.feed-filter-bar .btn {
+  padding: 0.25rem 0.45rem;
+  font-size: 0.75rem;
+}
+.feed-filter-bar > * {
+  flex-shrink: 0;
+}
+.feed-filter-bar {
+  scrollbar-width: none;
+}
+.feed-filter-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* FeedFilterBar's server/circle checklists — a plain <details>, not a
+   portaled popover like .popover-menu above, so this is positioned
+   relative to the <details> itself rather than a measured trigger
+   rect. No click-outside-to-close (native <details> doesn't have one)
+   — a deliberate simplicity tradeoff for a checklist this small. */
+.feed-filter-dropdown {
+  position: relative;
+}
+.feed-filter-dropdown > summary {
+  list-style: none;
+}
+.feed-filter-dropdown > summary::-webkit-details-marker {
+  display: none;
+}
+.feed-filter-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  z-index: 20;
+  min-width: 220px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.feed-filter-dropdown-menu label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
 }
 
 /* Intro sidebar (profile page) */

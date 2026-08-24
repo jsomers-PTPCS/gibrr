@@ -6,18 +6,12 @@ import { useEffect, useState, type FormEvent } from "react";
 import { getMe, getSetupStatus, type Me } from "../lib/api";
 import { Avatar } from "./Avatar";
 import { Logo } from "./Logo";
-import { LoopsIcon } from "./icons";
+import { LoopsIcon, FederatedIcon } from "./icons";
 
 export function Nav() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null | "loading">("loading");
   const [query, setQuery] = useState("");
-
-  // Federated/Circles/search collapse behind this on a narrow phone
-  // screen (see .nav-toggle/.nav-links in globals.css) — without it, that
-  // whole row is wider than the viewport and the entire page scrolls
-  // sideways to show it.
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     getMe()
@@ -63,31 +57,23 @@ export function Nav() {
         <LoopsIcon width={24} height={24} />
       </Link>
 
-      <button
-        type="button"
-        className="nav-toggle btn btn-ghost"
-        aria-label={mobileOpen ? "Close menu" : "Open menu"}
-        aria-expanded={mobileOpen}
-        onClick={() => setMobileOpen((open) => !open)}
-      >
-        {mobileOpen ? "✕" : "☰"}
-      </button>
+      {/* Federated/Circles text links + search — always visible now (no
+          hamburger to hide behind), just repositioned on mobile: the
+          search form is what actually fills this row's center there
+          (see .nav-links's own mobile rule), since Federated/Circles
+          both have their own icon elsewhere on that breakpoint and stay
+          hidden here (nav-federated-link/nav-circles-link). On desktop,
+          unchanged from before — all three sit together, left of center. */}
+      <div className="nav-links">
+        <Link href="/federated" className="nav-federated-link" style={{ whiteSpace: "nowrap" }}>
+          Federated
+        </Link>
 
-      <div className={`nav-links${mobileOpen ? " nav-links-open" : ""}`}>
-        {/* Hidden in the mobile hamburger — the bottom tab bar
-            (BottomTabBar.tsx) has its own Circles icon there instead.
-            Still shown inline on desktop, which has no bottom tab bar. */}
-        <Link href="/g" className="nav-circles-link" style={{ whiteSpace: "nowrap" }} onClick={() => setMobileOpen(false)}>
+        <Link href="/g" className="nav-circles-link" style={{ whiteSpace: "nowrap" }}>
           Circles
         </Link>
 
-        <form
-          onSubmit={(e) => {
-            handleSearch(e);
-            setMobileOpen(false);
-          }}
-          style={{ flex: 1, maxWidth: 360 }}
-        >
+        <form onSubmit={handleSearch} style={{ flex: 1, maxWidth: 360 }}>
           <input
             className="input"
             value={query}
@@ -97,27 +83,31 @@ export function Nav() {
             style={{ width: "100%" }}
           />
         </form>
-
-        <Link href="/federated" style={{ whiteSpace: "nowrap" }} onClick={() => setMobileOpen(false)}>
-          Federated
-        </Link>
       </div>
 
+      {/* Inverse of .nav-loops-icon above — hidden on desktop (where
+          "Federated" already shows as a plain text link just above),
+          shown only on mobile, top-right (see .nav-federated-icon's
+          mobile rule for its actual order in that row). */}
+      <Link href="/federated" aria-label="Federated" title="Federated" className="nav-federated-icon">
+        <FederatedIcon width={22} height={22} />
+      </Link>
+
       <div className="nav-spacer" />
-      {/* On mobile this collapses into the hamburger panel alongside
-          .nav-links instead of sitting in the top-right corner — see the
-          .nav-account media query in globals.css. Shares mobileOpen with
-          .nav-links so both open/close together. */}
-      <div className={`nav-account${mobileOpen ? " nav-account-open" : ""}`}>
+      {/* The profile link inside (nav-account-profile-link) is hidden on
+          mobile — BottomTabBar.tsx has its own, centered profile tab
+          there instead. Log in/Register stay visible on every size:
+          there's nothing else on mobile to reach them from now that
+          there's no hamburger panel for them to live in. */}
+      <div className="nav-account">
       {me === "loading" ? null : me ? (
         // Straight to the profile page — Settings and Log out live
         // there now, so there's no need for a separate switcher menu
         // just to reach them.
         <Link
           href={`/u/${me.actor.username}`}
-          onClick={() => setMobileOpen(false)}
-          className="btn btn-ghost"
-          style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+          className="btn btn-ghost nav-account-profile-link"
+          style={{ alignItems: "center", gap: "0.5rem" }}
         >
           <Avatar
             name={me.actor.displayName ?? me.actor.username}
@@ -129,10 +119,8 @@ export function Nav() {
         </Link>
       ) : (
         <>
-          <Link href="/login" onClick={() => setMobileOpen(false)}>
-            Log in
-          </Link>
-          <Link href="/register" className="btn btn-primary" onClick={() => setMobileOpen(false)}>
+          <Link href="/login">Log in</Link>
+          <Link href="/register" className="btn btn-primary">
             Register
           </Link>
         </>

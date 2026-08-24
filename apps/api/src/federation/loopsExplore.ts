@@ -21,6 +21,8 @@ interface LoopsItem {
   caption?: string;
   created_at?: string;
   account?: LoopsAccount;
+  likes?: number;
+  comments?: number;
 }
 
 function toExploreStatus(item: LoopsItem): ExploreStatus | null {
@@ -34,6 +36,7 @@ function toExploreStatus(item: LoopsItem): ExploreStatus | null {
     },
     contentText: item.caption ?? "",
     createdAt: item.created_at ?? new Date().toISOString(),
+    remoteCounts: { likes: item.likes ?? 0, comments: item.comments ?? 0 },
   };
 }
 

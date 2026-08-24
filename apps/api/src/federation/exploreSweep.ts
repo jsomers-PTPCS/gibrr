@@ -18,7 +18,18 @@ import { resolveAndCacheFunkwhaleTrack } from "./funkwhaleExplore.js";
 // instances via boosts).
 export async function runExploreSweep(): Promise<void> {
   const servers = await prisma.exploreServer.findMany({
-    where: { subscriptions: { some: {} } },
+    // A Loops-tagged server is swept exclusively by loopsSweep.ts now,
+    // even if someone also happens to be regular-Explore-subscribed to
+    // it — confirmed live this dual coverage was actually happening (a
+    // real subscriber on a real Loops server) and causing a real bug:
+    // this sweep's own ExploreCachedPost rows have no remote like/
+    // comment counts to write (it has no such data for anything), and
+    // for a video loopsSweep.ts hadn't *also* reprocessed since (it
+    // only revisits each server's current top 20, not its full history)
+    // that left the video's cached row stuck with no counts at all
+    // instead of the real ones loopsSweep.ts would otherwise have
+    // filled in.
+    where: { subscriptions: { some: {} }, software: { not: "Loops" } },
   });
   if (servers.length === 0) return;
 

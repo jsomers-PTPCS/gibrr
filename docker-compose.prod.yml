@@ -14,6 +14,29 @@ services:
       timeout: 5s
       retries: 10
 
+  # Self-hosted machine translation for the "Translate this" post feature
+  # (federation/translate.ts) — never exposed outside the compose network,
+  # the api service is the only caller. LT_LOAD_ONLY bounds which language
+  # models actually get downloaded on first start (each one costs real
+  # time/disk — the full catalog is unnecessary for most instances); add
+  # to this list in .env.prod if you need a language it doesn't cover.
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    restart: unless-stopped
+    environment:
+      LT_LOAD_ONLY: ${LIBRETRANSLATE_LANGUAGES:-en,es,fr,de,it,pt,zh,ja,ru,ar}
+      LT_DISABLE_WEB_UI: "true"
+    volumes:
+      - gibrr_libretranslate_data:/home/libretranslate/.local
+    expose:
+      - "5000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/languages')"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
   api:
     build:
       context: .
@@ -28,12 +51,7 @@ services:
       DOMAIN: ${API_DOMAIN}
       WEB_ORIGIN: https://${WEB_DOMAIN}
       NODE_ENV: production
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_SECURE: ${SMTP_SECURE:-false}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-no-reply@localhost}
+      LIBRETRANSLATE_URL: http://libretranslate:5000
     volumes:
       - gibrr_uploads_data:/app/apps/api/uploads
     expose:
@@ -80,3 +98,4 @@ volumes:
   gibrr_uploads_data:
   gibrr_caddy_data:
   gibrr_caddy_config:
+  gibrr_libretranslate_data:

@@ -3,7 +3,8 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { requireAuth, optionalAuth } from "../auth/session.js";
 import { attachCommentVotes } from "../votes.js";
-import { isLocalActor } from "../federation/localActor.js";
+import { isLocalActor, getOrCreateInstanceActor } from "../federation/localActor.js";
+import { syncRemoteReplies } from "../federation/remoteEngagement.js";
 import {
   createNoteFromComment,
   createActivity,
@@ -37,7 +38,48 @@ commentsRouter.get("/comments/:id", async (req, res) => {
   res.json(createNoteFromComment(comment, comment.author, comment.post));
 });
 
+// The actual, single choke point for "someone is about to look at this
+// post's comments" — hit whether that's the dedicated post page, a
+// feed's inline "expand comments" accordion (PostItem), or the Loops
+// video drawer, unlike GET /posts/:id's own remote-engagement fetch
+// (which only ever ran for whoever loaded that one dedicated page).
+// Confirmed live: a post viewed only through a feed/Loops never had its
+// real reply thread synced in at all before this, no matter how many
+// times its comments were opened. Reddit has no ActivityPub replies
+// collection to walk (see federation/remoteEngagement.ts), so it's
+// skipped the same way GET /posts/:id already skips it.
+//
+// ?sync=0 skips that live sync and just returns whatever's already
+// cached — confirmed live this sync can take real seconds against a
+// slow/unfamiliar remote server, which used to mean the whole comment
+// drawer sat blank that whole time even when it already had something
+// to show. PostComments.tsx uses this for its own first paint (instant,
+// whatever's cached), then calls this same route again without the
+// param to fetch/apply the fresher, synced result once it's ready —
+// stale-while-revalidate, not a change to what the default response
+// (no query param) does or guarantees.
 commentsRouter.get("/posts/:postId/comments", optionalAuth, async (req, res) => {
+  const skipSync = req.query.sync === "0";
+  const post = skipSync
+    ? null
+    : await prisma.post.findUnique({
+        where: { id: req.params.postId },
+        select: { id: true, remoteId: true },
+      });
+  if (post?.remoteId) {
+    const isReddit = (() => {
+      try {
+        return new URL(post.remoteId!).host.endsWith("reddit.com");
+      } catch {
+        return false;
+      }
+    })();
+    if (!isReddit) {
+      const instanceActor = await getOrCreateInstanceActor();
+      await syncRemoteReplies({ id: post.id, remoteId: post.remoteId }, instanceActor);
+    }
+  }
+
   const comments = await prisma.comment.findMany({
     where: { postId: req.params.postId },
     orderBy: { createdAt: "asc" },
@@ -64,11 +106,11 @@ commentsRouter.post("/posts/:postId/comments", requireAuth, async (req, res) => 
   const post = await prisma.post.findUnique({ where: { id: postId }, include: { author: true } });
   if (!post) return res.status(404).json({ error: "post not found" });
 
-  if (parentId) {
-    const parent = await prisma.comment.findUnique({ where: { id: parentId } });
-    if (!parent || parent.postId !== postId) {
-      return res.status(400).json({ error: "parent comment not found on this post" });
-    }
+  const parent = parentId
+    ? await prisma.comment.findUnique({ where: { id: parentId }, include: { author: true } })
+    : null;
+  if (parentId && (!parent || parent.postId !== postId)) {
+    return res.status(400).json({ error: "parent comment not found on this post" });
   }
 
   const comment = await prisma.comment.create({
@@ -78,11 +120,15 @@ commentsRouter.post("/posts/:postId/comments", requireAuth, async (req, res) => 
 
   const note = createNoteFromComment(comment, req.actor!, post);
   void deliverToFollowers(req.actor!, createActivity(note, req.actor!));
-  // Reply notification straight to the post's author, even if they don't
-  // follow the commenter back — matches how a reply reaches the original
-  // poster on Mastodon regardless of the follow graph.
-  if (post.authorActorId !== req.actor!.id && !isLocalActor(post.author)) {
-    void deliverActivity(req.actor!, post.author.inboxUrl, createActivity(note, req.actor!));
+  // Reply notification straight to whoever is actually being replied to
+  // (the parent comment's author for a nested reply, the post's author
+  // for a top-level one), even if they don't follow the commenter back —
+  // matches how a reply reaches its addressee on Mastodon regardless of
+  // the follow graph. A nested reply used to always notify the original
+  // post author instead of the comment author actually being replied to.
+  const replyTarget = parent ? parent.author : post.author;
+  if (replyTarget.id !== req.actor!.id && !isLocalActor(replyTarget)) {
+    void deliverActivity(req.actor!, replyTarget.inboxUrl, createActivity(note, req.actor!));
   }
 
   res.status(201).json({ ...comment, score: 0, myVote: null });

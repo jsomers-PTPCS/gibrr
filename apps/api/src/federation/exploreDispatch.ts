@@ -1,5 +1,5 @@
 import { fetchInstanceSoftware } from "./instanceSoftware.js";
-import { fetchExploreTimeline, type ExploreStatus } from "./mastodonExplore.js";
+import { fetchExploreTimeline, fetchMastodonAccountStatuses, type ExploreStatus } from "./mastodonExplore.js";
 import { fetchMisskeyTimeline } from "./misskeyExplore.js";
 import { fetchLoopsTimeline } from "./loopsExplore.js";
 import { fetchGhostTimeline } from "./ghostExplore.js";
@@ -44,4 +44,32 @@ export async function fetchExploreTimelineForDomain(
     default:
       return fetchExploreTimeline(domain, accessToken, limit);
   }
+}
+
+// Like fetchExploreTimelineForDomain above, but for one specific actor's
+// own posts rather than a whole domain's "what's happening" sample —
+// what routes/profile.ts's backfill needs. Only Mastodon-API-compatible
+// software (the default bucket above) has a real per-account endpoint to
+// use here; everything else falls back to that same domain-wide fetch,
+// left for the caller to filter down to this actor's entries — for a
+// single-actor domain (a Ghost blog, most Loops/PeerTube instances)
+// that's already equivalent to their real history, for a bigger
+// multi-user one it's only whatever of theirs is in that instance's
+// current public sample.
+const SPECIFICALLY_DISPATCHED = new Set(["Misskey", "Loops", "Ghost", "Lemmy", "PeerTube", "Mobilizon", "Funkwhale"]);
+
+export async function fetchActorTimelineForDomain(
+  domain: string,
+  username: string,
+  limit = 20,
+): Promise<ExploreStatus[] | null> {
+  const software = await fetchInstanceSoftware(domain);
+  // Same "everything unlisted is Mastodon-API-compatible" assumption
+  // fetchExploreTimelineForDomain's own default case makes (including
+  // when software detection itself fails, i.e. software === null) —
+  // the one bucket with a real per-account endpoint to use here.
+  if (!software || !SPECIFICALLY_DISPATCHED.has(software)) {
+    return fetchMastodonAccountStatuses(domain, username, limit);
+  }
+  return fetchExploreTimelineForDomain(domain, undefined, limit);
 }
