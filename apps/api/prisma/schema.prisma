@@ -120,6 +120,7 @@ model Actor {
   pollVotes      PollVote[]
   bookmarks      Bookmark[]
   antennas       Antenna[]
+  starterPacks   StarterPack[]
   profileMemosWritten ProfileMemo[] @relation("ProfileMemoAuthor")
   profileMemosAbout   ProfileMemo[] @relation("ProfileMemoSubject")
   exploreSubscriptions ExploreSubscription[]
@@ -621,6 +622,27 @@ model Antenna {
   // same way createPostSchema's specifiedHandles already are.
   watchedActorIds String[] @default([])
   createdAt       DateTime @default(now())
+
+  actor Actor @relation(fields: [actorId], references: [id])
+}
+
+// Loops (the video app)'s "starter kits" — a named, public, curated
+// bundle of up to 25 accounts around a theme, that anyone can browse
+// and one-tap follow every member of at once (routes/starterPacks.ts's
+// POST /starter-packs/:id/follow-all). Unlike the real Loops feature,
+// members are added directly by the creator with no per-account
+// approval/notification step or self-removal button — a deliberately
+// simpler version for a single small instance, not a multi-tenant
+// platform where an unwanted public association is a real complaint
+// vector. memberActorIds is a plain string array, not a real relation,
+// same reasoning as Antenna.watchedActorIds above.
+model StarterPack {
+  id             String   @id @default(uuid())
+  actorId        String
+  name           String
+  description    String?
+  memberActorIds String[] @default([])
+  createdAt      DateTime @default(now())
 
   actor Actor @relation(fields: [actorId], references: [id])
 }

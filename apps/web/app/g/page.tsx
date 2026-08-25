@@ -27,6 +27,7 @@ import {
 } from "../../lib/groupRoles";
 import { AntennasTab } from "../../components/AntennasTab";
 import { RssFeedsTab } from "../../components/RssFeedsTab";
+import { StarterKitsTab } from "../../components/StarterKitsTab";
 import { Avatar } from "../../components/Avatar";
 import { PageInfo } from "../../components/PageInfo";
 
@@ -468,6 +469,7 @@ export default function GroupsPage() {
         <>
           <AntennasTab />
           <RssFeedsTab />
+          <StarterKitsTab />
         </>
       )}
     </main>

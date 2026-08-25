@@ -763,7 +763,7 @@ export function AdminTab() {
       <h2 style={{ marginTop: "1.5rem" }}>Relays</h2>
       <p className="text-faint">
         Subscribe to a relay to see public Gibs from all its other subscribers under the
-        Conversations page&apos;s Federated tab — not just from people this room is listening to directly.
+        Conversations page&apos;s Fediverse tab — not just from people this room is listening to directly.
       </p>
       <div className="card">
         <p className="text-faint" style={{ marginTop: 0 }}>

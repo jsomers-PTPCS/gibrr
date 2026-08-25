@@ -202,7 +202,7 @@ export default function FederatedPage() {
 
   return (
     <main className="page">
-      <PageInfo title="Federated">
+      <PageInfo title="Fediverse">
         Every federated Gib this room knows about, not just from people you&apos;re listening to.
       </PageInfo>
 

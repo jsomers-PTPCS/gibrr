@@ -16,12 +16,13 @@ import {
   type LoopsSort,
 } from "../../lib/api";
 import { Avatar } from "../../components/Avatar";
-import { HeartIcon, CommentIcon, BoostIcon, BookmarkIcon } from "../../components/icons";
+import { HeartIcon, CommentIcon, BoostIcon, BookmarkIcon, MuteIcon, PlayIcon } from "../../components/icons";
 import { ShareMenu } from "../../components/ShareMenu";
 import { PostComments } from "../../components/PostComments";
 
 const LOOPS_SORT_OPTIONS: { value: LoopsSort; label: string }[] = [
   { value: "new", label: "New" },
+  { value: "rising", label: "Rising" },
   { value: "likes", label: "Most liked" },
   { value: "comments", label: "Most commented" },
 ];
@@ -37,9 +38,11 @@ function assetUrl(path: string) {
 // One full-viewport video slide — plays only while `active` (the
 // IntersectionObserver in the parent decides that), matching the
 // single-video-plays-at-a-time behavior every TikTok-style feed has.
-// Tapping the video toggles mute (shared across all slides, not
-// per-video, so it doesn't reset every swipe) since autoplay only
-// works muted in every real browser anyway.
+// Tapping the video pauses/resumes it in place (local per-slide state,
+// reset whenever the slide becomes active again); swiping it left to
+// right toggles mute instead, shared across all slides (not per-video,
+// so it doesn't reset every feed-swipe) since autoplay only works
+// muted in every real browser anyway.
 function LoopSlide({
   post,
   active,
@@ -66,9 +69,39 @@ function LoopSlide({
   // text — double-tapping/double-clicking reveals it, toggled per slide
   // rather than shared (each slide's own local state, since every slide
   // stays mounted the whole time this feed is open). A double-click also
-  // fires two ordinary clicks first, which flips onToggleMute twice —
-  // net no-op, so mute doesn't visibly change on a double-tap.
+  // fires two ordinary clicks first, which flips `paused` twice — net
+  // no-op, so playback doesn't visibly change on a double-tap.
   const [showDescription, setShowDescription] = useState(false);
+  // Local to each slide (not shared like `muted`) — pausing one video
+  // has no reason to pause whichever one you swipe to next.
+  const [paused, setPaused] = useState(false);
+  // A left-to-right swipe on the video toggles mute (not a plain click,
+  // which is already taken by play/pause). Tracked as a ref rather than
+  // state since it's read once per gesture and never needs a re-render.
+  // `swiped` survives from pointerup into the click handler that
+  // follows it — a swipe is still a press-then-release on the same
+  // element, so the browser fires an ordinary click right after, which
+  // would otherwise also toggle play/pause.
+  const SWIPE_THRESHOLD_PX = 60;
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const swipedRef = useRef(false);
+  const handleVideoPointerDown = (e: React.PointerEvent<HTMLVideoElement>) => {
+    swipeStartRef.current = { x: e.clientX, y: e.clientY };
+  };
+  const handleVideoPointerMove = (e: React.PointerEvent<HTMLVideoElement>) => {
+    const start = swipeStartRef.current;
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (dx > SWIPE_THRESHOLD_PX && Math.abs(dx) > Math.abs(dy)) {
+      swipedRef.current = true;
+      swipeStartRef.current = null;
+      onToggleMute();
+    }
+  };
+  const endVideoSwipe = () => {
+    swipeStartRef.current = null;
+  };
   // Slides in from the right over the video rather than navigating away
   // to /posts/:id — same "stay in the feed" reasoning ShareMenu replaced
   // the old view-original link for. Left uncovered on purpose (see the
@@ -76,7 +109,7 @@ function LoopSlide({
   // target to dismiss it from — the exposed strip functions as this
   // slide's own backdrop, not the drawer requiring a dedicated close
   // button (though one's included too, for anyone who taps the video
-  // itself expecting mute-toggle instead).
+  // itself expecting pause-toggle instead).
   const [commentsOpen, setCommentsOpen] = useState(false);
 
   useEffect(() => {
@@ -84,11 +117,32 @@ function LoopSlide({
     if (!video) return;
     if (active) {
       video.currentTime = 0;
+      setPaused(false);
       video.play().catch(() => {});
     } else {
       video.pause();
     }
   }, [active]);
+
+  // Manual play/pause, independent of the autoplay-on-active effect
+  // above — lets a click pause the slide in place without fighting the
+  // "reset to 0 and play" behavior that runs whenever `active` flips.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !active) return;
+    if (paused) video.pause();
+    else video.play().catch(() => {});
+  }, [paused, active]);
+
+  // React only applies the `muted` JSX prop on a <video> at initial
+  // mount — it does not reliably re-apply it on later re-renders, so a
+  // click that flips `muted` from true to false (or back) can leave the
+  // real DOM property unchanged. Setting it imperatively here keeps the
+  // actual audio state in sync with every toggle.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) video.muted = muted;
+  }, [muted]);
 
   return (
     <div
@@ -122,12 +176,74 @@ function LoopSlide({
         preload={preload}
         // While comments are open, the video (now only exposed on its
         // left strip — see the drawer below) is that drawer's own
-        // dismiss target instead of the usual mute toggle; tapping it
-        // again to unmute is one tap away once it's closed.
-        onClick={() => (commentsOpen ? setCommentsOpen(false) : onToggleMute())}
+        // dismiss target instead of the usual pause toggle; tapping it
+        // again to pause is one tap away once it's closed.
+        onClick={() => {
+          if (swipedRef.current) {
+            swipedRef.current = false;
+            return;
+          }
+          if (commentsOpen) setCommentsOpen(false);
+          else setPaused((p) => !p);
+        }}
         onDoubleClick={() => setShowDescription((s) => !s)}
-        style={{ width: "100%", height: "100%", objectFit: "contain", cursor: "pointer" }}
+        onPointerDown={handleVideoPointerDown}
+        onPointerMove={handleVideoPointerMove}
+        onPointerUp={endVideoSwipe}
+        onPointerCancel={endVideoSwipe}
+        // Lets the browser keep handling vertical swipes (scrolling
+        // between slides) natively while horizontal drags are left for
+        // the pointer handlers above to interpret as the mute gesture.
+        style={{ width: "100%", height: "100%", objectFit: "contain", cursor: "pointer", touchAction: "pan-y" }}
       />
+
+      {paused && !commentsOpen && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <PlayIcon
+            width={64}
+            height={64}
+            style={{ color: "#fff", opacity: 0.85, filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.5))" }}
+          />
+        </div>
+      )}
+
+      {/* A "you're muted" indicator that's also a shortcut — swiping the
+          video (its pointer handlers above) works too, but tapping this
+          directly unmutes without needing a swipe. Disappears once
+          unmuted, since there's nothing left to tap for. */}
+      {muted && (
+        <button
+          onClick={onToggleMute}
+          aria-label="Unmute"
+          title="Unmute"
+          style={{
+            position: "absolute",
+            top: "1rem",
+            left: "1rem",
+            width: "2.25rem",
+            height: "2.25rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#fff",
+            background: "rgba(0,0,0,0.35)",
+            border: "none",
+            borderRadius: "999px",
+            cursor: "pointer",
+          }}
+        >
+          <MuteIcon muted width={20} height={20} />
+        </button>
+      )}
 
       <div
         style={{
@@ -367,7 +483,7 @@ export default function LoopsPage() {
   // video's real like/comment totals, not something with a local vote/
   // comment history to compute a velocity from — so this only offers
   // the two sorts that data actually supports.
-  const [loopsSort, setLoopsSort] = useState<LoopsSort>("new");
+  const [loopsSort, setLoopsSort] = useState<LoopsSort>("rising");
   const [selectedLoopsDomains, setSelectedLoopsDomains] = useState<string[]>([]);
   const [availableLoopsDomains, setAvailableLoopsDomains] = useState<string[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);

@@ -66,7 +66,7 @@ export function Nav() {
           unchanged from before — all three sit together, left of center. */}
       <div className="nav-links">
         <Link href="/federated" className="nav-federated-link" style={{ whiteSpace: "nowrap" }}>
-          Federated
+          Fediverse
         </Link>
 
         <Link href="/g" className="nav-circles-link" style={{ whiteSpace: "nowrap" }}>
@@ -86,10 +86,10 @@ export function Nav() {
       </div>
 
       {/* Inverse of .nav-loops-icon above — hidden on desktop (where
-          "Federated" already shows as a plain text link just above),
+          "Fediverse" already shows as a plain text link just above),
           shown only on mobile, top-right (see .nav-federated-icon's
           mobile rule for its actual order in that row). */}
-      <Link href="/federated" aria-label="Federated" title="Federated" className="nav-federated-icon">
+      <Link href="/federated" aria-label="Fediverse" title="Fediverse" className="nav-federated-icon">
         <FederatedIcon width={22} height={22} />
       </Link>
 

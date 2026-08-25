@@ -706,19 +706,20 @@ postsRouter.get("/feed", optionalAuth, async (req, res) => {
   // frontend's "pass nextCursor back to load more" flow doesn't need to
   // know which kind of feed it's paging through.
   if (sort !== "new") {
-    // A freshly-cached federated post's local commentCount is close to
-    // meaningless for ranking purposes — comments only get pulled in
-    // from the origin server lazily, the first time someone actually
-    // opens that post's thread (routes/comments.ts), so most candidates
-    // sit at 0 regardless of how active the real post is. Confirmed
-    // live: sorting 500 candidates by raw commentCount surfaced nothing
-    // but zeros ahead of posts with real double-digit comment counts on
-    // their origin server. "comments" fetches each candidate's live
-    // count (federation/remoteEngagement.ts, the same fetch GET
-    // /posts/:id already does for one post) before ranking rather than
-    // after — a real per-post network cost, so the candidate window is
-    // cut down for this one sort specifically to keep it bounded.
-    const RANK_CANDIDATE_CAP = sort === "comments" ? 150 : 500;
+    // A freshly-cached federated post's local commentCount/score is close
+    // to meaningless for ranking purposes on their own — comments only
+    // get pulled in from the origin server lazily, the first time someone
+    // actually opens that post's thread (routes/comments.ts), and a local
+    // vote score alone ignores every like/boost the post has picked up
+    // elsewhere in the fediverse. Confirmed live: sorting 500 candidates
+    // by raw commentCount surfaced nothing but zeros ahead of posts with
+    // real double-digit comment counts on their origin server. Both
+    // "comments" and "top" fetch each candidate's live counts
+    // (federation/remoteEngagement.ts, the same fetch GET /posts/:id
+    // already does for one post) before ranking rather than after — a
+    // real per-post network cost, so the candidate window is cut down for
+    // these two sorts specifically to keep it bounded.
+    const RANK_CANDIDATE_CAP = sort === "comments" || sort === "top" ? 150 : 500;
     const page = cursor && /^\d+$/.test(cursor) ? parseInt(cursor, 10) : 0;
 
     const candidates = await prisma.post.findMany({
@@ -798,13 +799,25 @@ postsRouter.get("/feed", optionalAuth, async (req, res) => {
         }),
       );
     }
-    if (sort === "comments") await fetchRemoteEngagementFor(withCounts);
+    // "Top" needs each candidate's live fediverse counts before it can
+    // rank at all too — a local vote score alone ignores every like,
+    // reaction, and boost the post picked up on its origin server (or
+    // anywhere else in the fediverse), which is most of a federated
+    // post's real popularity.
+    if (sort === "comments" || sort === "top") await fetchRemoteEngagementFor(withCounts);
 
     const now = Date.now();
     function metricFor(post: (typeof withCounts)[number]): number {
       switch (sort) {
-        case "top":
-          return post.score;
+        case "top": {
+          // Local score (this instance's own up/downvotes) plus local
+          // emoji reactions plus the origin server's live favourite and
+          // boost/reblog counts — a federated post's real popularity
+          // isn't just whatever votes it picked up here.
+          const localReactions = post.reactions.reduce((sum, r) => sum + r.count, 0);
+          const remote = remoteEngagementByPostId.get(post.id);
+          return post.score + localReactions + (remote?.likes ?? 0) + (remote?.shares ?? 0);
+        }
         case "rising": {
           // Velocity, not raw score — a brand-new post with a handful of
           // votes can outrank an old post that's merely accumulated more

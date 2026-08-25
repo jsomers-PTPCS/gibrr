@@ -30,6 +30,7 @@ import { customEmojiRouter } from "./routes/customEmoji.js";
 import { nodeinfoRouter } from "./routes/nodeinfo.js";
 import { adminRouter } from "./routes/admin.js";
 import { antennasRouter } from "./routes/antennas.js";
+import { starterPacksRouter } from "./routes/starterPacks.js";
 import { exploreRouter } from "./routes/explore.js";
 import { rssRouter } from "./routes/rss.js";
 import { translateRouter } from "./routes/translate.js";
@@ -124,6 +125,7 @@ export function createApp() {
   app.use(customEmojiRouter);
   app.use(nodeinfoRouter);
   app.use(antennasRouter);
+  app.use(starterPacksRouter);
   app.use(exploreRouter);
   app.use(rssRouter);
   app.use(translateRouter);

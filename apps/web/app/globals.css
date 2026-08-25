@@ -1127,3 +1127,14 @@ select.input:focus {
   color: var(--text-dim);
   font-size: 0.92rem;
 }
+
+/* Starter kit list rows (components/StarterKitsTab.tsx) — a long
+   description squeezed into a narrow phone-width column wraps into an
+   unreadably tall stack of near-single-word lines, so it's dropped
+   there entirely rather than truncated; the kit's own page still shows
+   it in full. Same 640px breakpoint as this file's other phone rules. */
+@media (max-width: 640px) {
+  .starter-kit-description {
+    display: none;
+  }
+}

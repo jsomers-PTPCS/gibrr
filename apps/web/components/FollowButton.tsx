@@ -67,14 +67,14 @@ export function FollowButton({
   if (status === "pending") {
     return (
       <button className="btn btn-ghost" disabled={busy} onClick={stop}>
-        Listen Requested — Cancel
+        Pending
       </button>
     );
   }
 
   return (
     <button className="btn btn-ghost" disabled={busy} onClick={stop}>
-      ✓ Listening — Unlisten
+      Listening
     </button>
   );
 }

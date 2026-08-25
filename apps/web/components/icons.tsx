@@ -81,6 +81,35 @@ export function CommentIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// Loops' (app/loops/page.tsx) dedicated mute toggle — a speaker with
+// sound waves when unmuted, a speaker with an X when muted.
+export function MuteIcon({ muted = false, ...props }: SVGProps<SVGSVGElement> & { muted?: boolean }) {
+  return (
+    <Icon {...props}>
+      <path d="M4 9v6h4l5 4V5L8 9H4Z" fill="currentColor" stroke="none" />
+      {muted ? (
+        <path d="M16 9l6 6M22 9l-6 6" />
+      ) : (
+        <>
+          <path d="M17.5 8.5a5 5 0 0 1 0 7" />
+          <path d="M20 6a9 9 0 0 1 0 12" />
+        </>
+      )}
+    </Icon>
+  );
+}
+
+// Loops' (app/loops/page.tsx) center-of-screen "paused" overlay — the
+// standard tap-to-play triangle every video app shows once a viewer
+// pauses in place.
+export function PlayIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M8 5v14l11-7-11-7Z" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
 // PostItem.tsx's "Translate this" button — a plain globe, since a
 // literal "A/文" glyph doesn't read cleanly at icon size.
 export function TranslateIcon(props: SVGProps<SVGSVGElement>) {

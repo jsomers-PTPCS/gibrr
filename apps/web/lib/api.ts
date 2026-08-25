@@ -632,6 +632,71 @@ export function getAntennaPosts(id: string) {
   return apiFetch<{ antenna: Antenna; posts: Post[] }>(`/antennas/${encodeURIComponent(id)}/posts`);
 }
 
+// Loops (the video app)'s "starter kits" — a named, public bundle of up
+// to 25 accounts around a theme that anyone can browse and one-tap
+// follow every member of. See routes/starterPacks.ts's own comment for
+// how this simplifies the real feature (no per-member approval/self-
+// removal). `id` is needed on each member (unlike ActorSummary) since
+// StarterKitsTab renders a real FollowButton per member.
+export interface StarterPackMember {
+  id: string;
+  username: string;
+  domain: string;
+  displayName: string | null;
+  avatarImageUrl: string | null;
+  avatarPreset: AvatarPresetKey | null;
+}
+
+export interface StarterPack {
+  id: string;
+  name: string;
+  description: string | null;
+  creator: StarterPackMember | null;
+  members: StarterPackMember[];
+  createdAt: string;
+  isOwner: boolean;
+}
+
+export function getStarterPacks() {
+  return apiFetch<StarterPack[]>("/starter-packs");
+}
+
+export function getStarterPack(id: string) {
+  return apiFetch<StarterPack>(`/starter-packs/${encodeURIComponent(id)}`);
+}
+
+export function createStarterPack(input: { name: string; description?: string; memberHandles?: string[] }) {
+  return apiFetch<StarterPack>("/starter-packs", { method: "POST", body: JSON.stringify(input) });
+}
+
+// Clones a real fediverse starter kit (Loops' own, or Mastodon's
+// "Collections" — both implement the same FEP-7aa9 FeaturedCollection
+// standard) by URL, rather than retyping every member's handle by hand.
+export function importStarterPack(url: string) {
+  return apiFetch<StarterPack>("/starter-packs/import", { method: "POST", body: JSON.stringify({ url }) });
+}
+
+export function updateStarterPack(
+  id: string,
+  input: { name?: string; description?: string; memberHandles?: string[] },
+) {
+  return apiFetch<StarterPack>(`/starter-packs/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteStarterPack(id: string) {
+  return apiFetch<void>(`/starter-packs/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function followAllInStarterPack(id: string) {
+  return apiFetch<{ followed: number; alreadyFollowing: number; total: number }>(
+    `/starter-packs/${encodeURIComponent(id)}/follow-all`,
+    { method: "POST" },
+  );
+}
+
 // A listened-to RSS/Atom feed (Reddit's own per-subreddit .rss included)
 // — its items merge into Home like any other subscribed source once
 // federation/rssFeeds.ts's sweep catches them, same as Explore server
@@ -1549,7 +1614,7 @@ export function getExploreTimeline(domain: string) {
 // scrollable view. Each item is a real, already-resolved Post (full
 // vote/boost/bookmark state included), not a raw preview like
 // getExploreTimeline.
-export type LoopsSort = "new" | "likes" | "comments";
+export type LoopsSort = "new" | "rising" | "likes" | "comments";
 
 export function getLoopsFeed(filters?: { sort?: LoopsSort; domains?: string[] }) {
   const params = new URLSearchParams();

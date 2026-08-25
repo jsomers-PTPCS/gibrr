@@ -51,26 +51,34 @@ async function findServersBySoftware(software: string) {
 }
 
 // GET /explore/loops/feed -> an aggregated video feed across every
-// Host-curated server detected as Loops software — the TikTok-style
-// scrollable "Loops" subcategory (apps/web/app/loops/page.tsx). Reads
-// from federation/loopsSweep.ts's own periodic cache rather than
-// checking every Loops server live on each request — confirmed live
-// that live version cost 800ms-2s+ per load (bounded by whichever
-// server answered slowest) and hit every Loops server on every single
-// page view; this is a plain DB query instead, same "sweep on a
-// schedule, serve from cache" shape federation/exploreSweep.ts already
-// uses for regular Explore content. Content is only as fresh as the
-// last sweep (5 minutes by default), not live-checked per request —
-// the same tradeoff Explore's own feed already makes.
+// Host-curated server detected as Loops software, PLUS any video the
+// viewer's own follows have posted (even from a server never curated
+// into Explore) — the TikTok-style scrollable "Loops" subcategory
+// (apps/web/app/loops/page.tsx). The curated half reads from
+// federation/loopsSweep.ts's own periodic cache rather than checking
+// every Loops server live on each request — confirmed live that live
+// version cost 800ms-2s+ per load (bounded by whichever server answered
+// slowest) and hit every Loops server on every single page view; this
+// is a plain DB query instead, same "sweep on a schedule, serve from
+// cache" shape federation/exploreSweep.ts already uses for regular
+// Explore content. Content is only as fresh as the last sweep (5
+// minutes by default), not live-checked per request — the same
+// tradeoff Explore's own feed already makes. The follows half needs no
+// sweep at all — a followed account's posts already arrive locally via
+// ordinary inbox delivery, same as anywhere else in the app.
 exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
   // "new" (default, createdAt desc — unchanged from before this param
-  // existed) plus two sorts the cache already has real data for at no
-  // extra query cost: each ExploreCachedPost row already carries the
-  // origin server's own like/comment totals as of the last sweep (see
-  // that model's own schema comment), so ranking by them is just an
-  // in-memory sort of what was already being fetched, not a second
-  // round trip anywhere.
-  const sort = req.query.sort === "likes" || req.query.sort === "comments" ? req.query.sort : "new";
+  // existed) plus sorts the cache already has real data for at no extra
+  // query cost: each ExploreCachedPost row already carries the origin
+  // server's own like/comment totals as of the last sweep (see that
+  // model's own schema comment), so ranking by them — or by "rising"'s
+  // likes/age velocity, same formula as posts.ts's own rising sort — is
+  // just an in-memory sort of what was already being fetched, not a
+  // second round trip anywhere.
+  const sort =
+    req.query.sort === "likes" || req.query.sort === "comments" || req.query.sort === "rising"
+      ? req.query.sort
+      : "new";
   // "Show only these" allow-list, same shape/semantics as Home/
   // Federated's own server filter (FeedFilterBar.tsx) — empty means no
   // narrowing, same as today.
@@ -85,7 +93,6 @@ exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
     },
     select: { postId: true, remoteLikes: true, remoteComments: true },
   });
-  if (cached.length === 0) return res.json({ posts: [] });
 
   // Keyed by postId, not by cached row — the same video can in
   // principle turn up in more than one Loops server's own timeline (a
@@ -95,13 +102,39 @@ exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
     remoteCountsByPostId.set(entry.postId, { likes: entry.remoteLikes, comments: entry.remoteComments });
   }
 
-  const postIds = [...remoteCountsByPostId.keys()];
+  // Every account the viewer follows who's posted a video — a followed
+  // Loops account's own videos belong here regardless of whether their
+  // server has ever been curated into Explore (most won't be: Explore
+  // only tracks a small hand-picked list, but a follow is a much
+  // stronger, individually-chosen signal than that list). Not gated on
+  // remoteId/domain at all, so a followed *local* video counts too.
+  const followingIds = (
+    await prisma.follow.findMany({
+      where: { followerId: req.actor!.id, state: "accepted" },
+      select: { followingId: true },
+    })
+  ).map((f) => f.followingId);
+
+  const postIds = new Set(remoteCountsByPostId.keys());
+  if (followingIds.length > 0) {
+    const followedVideoPosts = await prisma.post.findMany({
+      where: {
+        authorActorId: { in: followingIds },
+        videoUrl: { not: null },
+        ...(domainFilter.length > 0 ? { author: { domain: { in: domainFilter } } } : {}),
+      },
+      select: { id: true },
+      take: 60,
+    });
+    for (const p of followedVideoPosts) postIds.add(p.id);
+  }
+  if (postIds.size === 0) return res.json({ posts: [] });
 
   const posts = await prisma.post.findMany({
-    where: { id: { in: postIds }, videoUrl: { not: null } },
+    where: { id: { in: [...postIds] }, videoUrl: { not: null } },
     orderBy: { createdAt: "desc" },
     include: postInclude,
-    take: 60,
+    take: 90,
   });
 
   const postsWithVotes = await attachPostVotes(posts, req.actor!.id);
@@ -132,6 +165,15 @@ exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
     resultPosts.sort((a, b) => (b.remoteEngagement?.likes ?? 0) - (a.remoteEngagement?.likes ?? 0));
   } else if (sort === "comments") {
     resultPosts.sort((a, b) => (b.remoteEngagement?.comments ?? 0) - (a.remoteEngagement?.comments ?? 0));
+  } else if (sort === "rising") {
+    // Velocity, not raw likes — a brand-new video with a handful of
+    // likes can outrank one that's merely accumulated more over a much
+    // longer time. Floored at 1 hour so a video from the last few
+    // minutes doesn't get an extreme, noisy likes/age ratio.
+    const now = Date.now();
+    const velocity = (post: (typeof resultPosts)[number]) =>
+      (post.remoteEngagement?.likes ?? 0) / Math.max(1, (now - post.createdAt.getTime()) / 3_600_000);
+    resultPosts.sort((a, b) => velocity(b) - velocity(a));
   }
 
   res.json({ posts: resultPosts });

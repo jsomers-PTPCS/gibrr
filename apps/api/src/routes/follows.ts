@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import type { Actor } from "@prisma/client";
 import { prisma } from "../db.js";
 import { requireAuth, optionalAuth } from "../auth/session.js";
 import { localDomain, actorIri, isLocalActor } from "../federation/localActor.js";
@@ -8,6 +9,38 @@ import { deliverActivity } from "../federation/deliver.js";
 import { followActivity, undoFollowActivity } from "../federation/activities.js";
 
 export const followsRouter = Router();
+
+// Shared by POST /follows below and routes/starterPacks.ts's bulk
+// follow-all — both already have a resolved target Actor row in hand
+// (a starter pack's members are stored as actor ids, no handle
+// resolution needed), so this starts right after that point: create the
+// Follow row (accepted immediately for a local target, pending for a
+// remote one awaiting their Accept), delivering the signed Follow
+// activity only in the remote case.
+export type FollowOutcome =
+  | { status: "followed"; state: "accepted" | "pending" }
+  | { status: "already" }
+  | { status: "self" };
+
+export async function followActor(follower: Actor, target: Actor): Promise<FollowOutcome> {
+  if (target.id === follower.id) return { status: "self" };
+
+  const existing = await prisma.follow.findUnique({
+    where: { followerId_followingId: { followerId: follower.id, followingId: target.id } },
+  });
+  if (existing) return { status: "already" };
+
+  const local = isLocalActor(target);
+  const follow = await prisma.follow.create({
+    data: { followerId: follower.id, followingId: target.id, state: local ? "accepted" : "pending" },
+  });
+
+  if (!local) {
+    await deliverActivity(follower, target.inboxUrl, followActivity(follower, actorIri(target)));
+  }
+
+  return { status: "followed", state: follow.state };
+}
 
 const FOLLOW_SUMMARY_SELECT = {
   id: true,
@@ -63,29 +96,13 @@ followsRouter.post("/follows", requireAuth, async (req, res) => {
     }
   }
   if (!target) return res.status(404).json({ error: "not found" });
-  if (target.id === req.actor!.id) {
-    return res.status(400).json({ error: "can't follow yourself" });
+
+  const outcome = await followActor(req.actor!, target);
+  if (outcome.status === "self") return res.status(400).json({ error: "can't follow yourself" });
+  if (outcome.status === "already") {
+    return res.status(409).json({ error: "already following, or a request is pending" });
   }
-
-  const existing = await prisma.follow.findUnique({
-    where: { followerId_followingId: { followerId: req.actor!.id, followingId: target.id } },
-  });
-  if (existing) return res.status(409).json({ error: "already following, or a request is pending" });
-
-  const local = isLocalActor(target);
-  const follow = await prisma.follow.create({
-    data: {
-      followerId: req.actor!.id,
-      followingId: target.id,
-      state: local ? "accepted" : "pending",
-    },
-  });
-
-  if (!local) {
-    await deliverActivity(req.actor!, target.inboxUrl, followActivity(req.actor!, actorIri(target)));
-  }
-
-  res.status(201).json({ state: follow.state });
+  res.status(201).json({ state: outcome.state });
 });
 
 // DELETE /follows/:actorId -> unfollow. Idempotent (no error if there was
