@@ -426,7 +426,13 @@ export default function GroupsPage() {
                 <li
                   key={server.domain}
                   className="card"
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "0.75rem",
+                    minWidth: 0,
+                  }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <Link

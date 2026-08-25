@@ -121,7 +121,7 @@ export default function ExploreServerPage() {
       {Array.isArray(statuses) && statuses.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>
           {statuses.map((status) => (
-            <li key={status.url} className="card">
+            <li key={status.url} className="card" style={{ minWidth: 0 }}>
               <div style={{ display: "flex", gap: "0.75rem" }}>
                 <Avatar
                   name={status.author.displayName ?? status.author.username}
@@ -133,7 +133,9 @@ export default function ExploreServerPage() {
                   <span className="text-faint" style={{ marginLeft: "0.4rem", fontSize: "0.85rem" }}>
                     @{status.author.username}@{domain}
                   </span>
-                  <p style={{ margin: "0.3rem 0", whiteSpace: "pre-wrap" }}>{status.contentText}</p>
+                  <p style={{ margin: "0.3rem 0", whiteSpace: "pre-wrap", overflowWrap: "break-word" }}>
+                    {status.contentText}
+                  </p>
                   <button
                     className="btn btn-ghost"
                     disabled={openingUrl === status.url}

@@ -25,6 +25,7 @@ import { PictureChooser } from "../../components/PictureChooser";
 import { ColorSwatchPicker } from "../../components/ColorSwatchPicker";
 import { EditProfileTab } from "../../components/EditProfileTab";
 import { AdminTab } from "../../components/AdminTab";
+import { PageInfo } from "../../components/PageInfo";
 import { FONT_PRESETS, FONT_PRESET_LABELS, type FontPresetKey } from "../../lib/fontPresets";
 import {
   HEADER_PRESETS,
@@ -316,10 +317,9 @@ export default function SettingsPage() {
       {tab === "account" && (
       <>
       <div className="card">
-        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Theme</h2>
-        <p className="text-dim" style={{ marginTop: 0 }}>
+        <PageInfo title="Theme" level="h2">
           Choose how Gibrr looks on this device.
-        </p>
+        </PageInfo>
         <div style={{ display: "flex", gap: "0.5rem" }}>
           <button
             className={`btn ${theme === "dark" ? "btn-primary" : "btn-ghost"}`}
@@ -337,11 +337,10 @@ export default function SettingsPage() {
       </div>
 
       <div className="card">
-        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Export your calendar</h2>
-        <p className="text-faint" style={{ marginTop: 0 }}>
+        <PageInfo title="Export your calendar" level="h2">
           Get a link you can subscribe to from Google Calendar, Outlook, Apple Calendar, or any
           other app — it stays in sync with the events you've added to your own Gibrr calendar.
-        </p>
+        </PageInfo>
 
         {exportUrl === "loading" ? (
           <p className="text-dim">Loading…</p>
@@ -378,11 +377,10 @@ export default function SettingsPage() {
       </div>
 
       <div className="card">
-        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Two-factor authentication</h2>
-        <p className="text-faint" style={{ marginTop: 0 }}>
+        <PageInfo title="Two-factor authentication" level="h2">
           Require a code from an authenticator app (or a one-time backup code) in addition to your
           password when logging in.
-        </p>
+        </PageInfo>
 
         {twoFactorStep === "idle" && me !== "loading" && me && (
           <>
@@ -494,10 +492,9 @@ export default function SettingsPage() {
       </div>
 
       <div className="card">
-        <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Blocked accounts</h2>
-        <p className="text-faint" style={{ marginTop: 0 }}>
+        <PageInfo title="Blocked accounts" level="h2">
           Blocking removes any follow relationship and hides their posts from your feed and search.
-        </p>
+        </PageInfo>
         {blockedActors === "loading" ? (
           <p className="text-dim">Loading…</p>
         ) : blockedActors.length === 0 ? (
@@ -528,12 +525,11 @@ export default function SettingsPage() {
       {profile !== "loading" && profile !== "error" && (
         <form onSubmit={handleSaveAppearance}>
           <div className="card">
-            <h2 style={{ marginTop: 0, fontSize: "1.05rem" }}>Appearance</h2>
-            <p className="text-faint" style={{ marginTop: 0 }}>
+            <PageInfo title="Appearance" level="h2">
               Customize your profile's fonts, colors, and images. If a combination would be hard to
               read, we'll automatically swap in black or white text in that spot — for every visitor,
               in both light and dark mode.
-            </p>
+            </PageInfo>
 
             <label className="field">
               Font

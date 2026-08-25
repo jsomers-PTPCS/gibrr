@@ -195,10 +195,10 @@ export function StarterKitsTab() {
       {Array.isArray(packs) && packs.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>
           {packs.map((pack) => (
-            <li key={pack.id} className="card" style={{ display: "grid", gap: "0.5rem" }}>
+            <li key={pack.id} className="card" style={{ display: "grid", gap: "0.5rem", minWidth: 0 }}>
               <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.75rem" }}>
                 <div style={{ flex: "1 1 12rem", minWidth: 0 }}>
-                  <Link href={`/starter-kits/${pack.id}`} style={{ fontWeight: 600 }}>
+                  <Link href={`/starter-kits/${pack.id}`} style={{ fontWeight: 600, overflowWrap: "anywhere" }}>
                     {pack.name}
                   </Link>
                   {pack.description && (

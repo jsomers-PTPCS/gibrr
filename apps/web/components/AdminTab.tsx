@@ -48,6 +48,14 @@ import { Avatar } from "./Avatar";
 import { DiskUsageMeter } from "./DiskUsageMeter";
 import { dedupeDirectoriesByUrl, type FediverseDirectoryLink } from "../lib/fediverseDirectories";
 import { useConfirm } from "./ConfirmDialog";
+import { PageInfo } from "./PageInfo";
+
+// Explore servers has grown large enough on some rooms (FediDB auto-sync
+// alone can add dozens) that one long unbroken list became a scroll
+// slog — paged the same flat 10-per-page way rather than adding
+// search/sort here too, since "find one to remove" is already covered
+// by the add form's own domain input.
+const EXPLORE_SERVERS_PAGE_SIZE = 10;
 
 function formatBytes(bytes: number | null): string {
   if (bytes === null) return "unknown";
@@ -119,6 +127,7 @@ export function AdminTab() {
   const [blockError, setBlockError] = useState<string | null>(null);
   const [removingBlockDomain, setRemovingBlockDomain] = useState<string | null>(null);
   const [exploreServers, setExploreServers] = useState<ExploreServer[] | "loading" | "error">("loading");
+  const [exploreServerPage, setExploreServerPage] = useState(0);
   const [exploreDomain, setExploreDomain] = useState("");
   const [exploreName, setExploreName] = useState("");
   const [addingExploreServer, setAddingExploreServer] = useState(false);
@@ -698,10 +707,11 @@ export function AdminTab() {
         )}
       </div>
 
-      <h2 style={{ marginTop: "1.5rem" }}>Flags</h2>
-      <p className="text-faint">
-        Filed locally, or received as an ActivityPub Flag from another room — same queue either way.
-      </p>
+      <div style={{ marginTop: "1.5rem" }}>
+        <PageInfo title="Flags" level="h2">
+          Filed locally, or received as an ActivityPub Flag from another room — same queue either way.
+        </PageInfo>
+      </div>
       <div className="card">
         {reports === "loading" ? (
           <p className="text-dim">Loading…</p>
@@ -760,11 +770,12 @@ export function AdminTab() {
         )}
       </div>
 
-      <h2 style={{ marginTop: "1.5rem" }}>Relays</h2>
-      <p className="text-faint">
-        Subscribe to a relay to see public Gibs from all its other subscribers under the
-        Conversations page&apos;s Fediverse tab — not just from people this room is listening to directly.
-      </p>
+      <div style={{ marginTop: "1.5rem" }}>
+        <PageInfo title="Relays" level="h2">
+          Subscribe to a relay to see public Gibs from all its other subscribers under the
+          Conversations page&apos;s Fediverse tab — not just from people this room is listening to directly.
+        </PageInfo>
+      </div>
       <div className="card">
         <p className="text-faint" style={{ marginTop: 0 }}>
           Real, live relay servers (sourced from Fediverse Observer&apos;s public directory) —
@@ -927,12 +938,13 @@ export function AdminTab() {
         )}
       </div>
 
-      <h2 style={{ marginTop: "1.5rem" }}>Domain blocks</h2>
-      <p className="text-faint">
-        Defederate a whole remote server — incoming activities from it are rejected, nothing new is
-        discovered from it, and nothing is delivered to it. Doesn't retroactively remove content
-        already cached from that domain.
-      </p>
+      <div style={{ marginTop: "1.5rem" }}>
+        <PageInfo title="Domain blocks" level="h2">
+          Defederate a whole remote server — incoming activities from it are rejected, nothing new is
+          discovered from it, and nothing is delivered to it. Doesn&apos;t retroactively remove content
+          already cached from that domain.
+        </PageInfo>
+      </div>
       <div className="card">
         <form onSubmit={handleAddDomainBlock} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
           <input
@@ -996,25 +1008,22 @@ export function AdminTab() {
         )}
       </div>
 
-      <h2 style={{ marginTop: "1.5rem", display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
-        Explore servers
-        {Array.isArray(exploreServers) && (
-          <span className="text-faint" style={{ fontSize: "0.9rem", fontWeight: 400 }}>
-            {exploreServers.length} server{exploreServers.length === 1 ? "" : "s"}
-          </span>
-        )}
-      </h2>
-      <p className="text-faint">
-        Servers users can browse trending/public content from under Explore — a live read of each
-        server's own real public API, not federation. Mastodon, Pleroma/Akkoma, Misskey, Lemmy,
-        PeerTube, Loops, Ghost, and Mobilizon all work with plain &quot;Add server&quot;. Pixelfed and
-        Friendica lock their public API behind a login — use &quot;Connect via OAuth&quot; for those
-        instead, which sends you to that server to log in and authorize Gibrr. Funkwhale works the
-        same way as the rest, but its own strict signature checks mean it needs this instance to be
-        reachable from the public internet — it won&apos;t succeed from a local/offline dev setup.
-        A few platforms can&apos;t be added at all: Threads and BookWyrm expose no usable public API,
-        and Diaspora doesn&apos;t speak ActivityPub.
-      </p>
+      <div style={{ marginTop: "1.5rem" }}>
+        <PageInfo
+          title={`Explore servers${Array.isArray(exploreServers) ? ` — ${exploreServers.length} server${exploreServers.length === 1 ? "" : "s"}` : ""}`}
+          level="h2"
+        >
+          Servers users can browse trending/public content from under Explore — a live read of each
+          server&apos;s own real public API, not federation. Mastodon, Pleroma/Akkoma, Misskey, Lemmy,
+          PeerTube, Loops, Ghost, and Mobilizon all work with plain &quot;Add server&quot;. Pixelfed and
+          Friendica lock their public API behind a login — use &quot;Connect via OAuth&quot; for those
+          instead, which sends you to that server to log in and authorize Gibrr. Funkwhale works the
+          same way as the rest, but its own strict signature checks mean it needs this instance to be
+          reachable from the public internet — it won&apos;t succeed from a local/offline dev setup.
+          A few platforms can&apos;t be added at all: Threads and BookWyrm expose no usable public API,
+          and Diaspora doesn&apos;t speak ActivityPub.
+        </PageInfo>
+      </div>
       <div className="card">
         {exploreOauthNotice && (
           <p className={exploreOauthNotice.success ? "text-dim" : "error-text"} style={{ marginTop: 0 }}>
@@ -1064,55 +1073,101 @@ export function AdminTab() {
         ) : exploreServers.length === 0 ? (
           <p className="text-dim">No servers added yet.</p>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            {exploreServers.map((server) => (
-              <div
-                key={server.domain}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "0.75rem",
-                  padding: "0.6rem 0.25rem",
-                  borderBottom: "1px solid var(--border)",
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                    <strong>{server.name || server.domain}</strong>
-                    {server.connected && <span className="pill">OAuth connected</span>}
-                    {server.source === "fedidb" && <span className="pill">via FediDB</span>}
-                  </div>
-                  {server.name && (
-                    <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
-                      {server.domain}
-                    </p>
-                  )}
+          (() => {
+            const totalPages = Math.ceil(exploreServers.length / EXPLORE_SERVERS_PAGE_SIZE);
+            // Clamped rather than stored pre-clamped — removing a server
+            // (or the list simply arriving) can leave a previously valid
+            // page past the new last one, and this way that self-corrects
+            // on the very next render instead of showing an empty page.
+            const page = Math.min(exploreServerPage, totalPages - 1);
+            const pageServers = exploreServers.slice(
+              page * EXPLORE_SERVERS_PAGE_SIZE,
+              page * EXPLORE_SERVERS_PAGE_SIZE + EXPLORE_SERVERS_PAGE_SIZE,
+            );
+            return (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {pageServers.map((server) => (
+                    <div
+                      key={server.domain}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "0.75rem",
+                        padding: "0.6rem 0.25rem",
+                        borderBottom: "1px solid var(--border)",
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                          <strong>{server.name || server.domain}</strong>
+                          {server.connected && <span className="pill">OAuth connected</span>}
+                          {server.source === "fedidb" && <span className="pill">via FediDB</span>}
+                        </div>
+                        {server.name && (
+                          <p className="text-faint" style={{ margin: "0.1rem 0 0" }}>
+                            {server.domain}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        className="btn btn-ghost"
+                        disabled={removingExploreDomain === server.domain}
+                        onClick={() => handleRemoveExploreServer(server)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
                 </div>
-                <button
-                  className="btn btn-ghost"
-                  disabled={removingExploreDomain === server.domain}
-                  onClick={() => handleRemoveExploreServer(server)}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
+                {totalPages > 1 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "0.75rem",
+                      marginTop: "0.75rem",
+                    }}
+                  >
+                    <button
+                      className="btn btn-ghost"
+                      disabled={page === 0}
+                      onClick={() => setExploreServerPage(page - 1)}
+                    >
+                      Previous
+                    </button>
+                    <span className="text-faint" style={{ fontSize: "0.85rem" }}>
+                      Page {page + 1} of {totalPages}
+                    </span>
+                    <button
+                      className="btn btn-ghost"
+                      disabled={page >= totalPages - 1}
+                      onClick={() => setExploreServerPage(page + 1)}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </>
+            );
+          })()
         )}
       </div>
 
-      <h2 style={{ marginTop: "1.5rem" }}>FediDB auto-sync</h2>
-      <p className="text-faint">
-        Automatically add every server{" "}
-        <a href="https://fedidb.org" target="_blank" rel="noreferrer">
-          FediDB
-        </a>{" "}
-        knows about with at least this many users — new ones that cross the threshold get picked
-        up on the next scheduled sync (every 24h) without you adding them by hand. Each candidate
-        still gets the same live verification a manual Add server does, so ones that don&apos;t
-        actually work (wrong software, offline) are skipped automatically.
-      </p>
+      <div style={{ marginTop: "1.5rem" }}>
+        <PageInfo title="FediDB auto-sync" level="h2">
+          Automatically add every server{" "}
+          <a href="https://fedidb.org" target="_blank" rel="noreferrer">
+            FediDB
+          </a>{" "}
+          knows about with at least this many users — new ones that cross the threshold get picked
+          up on the next scheduled sync (every 24h) without you adding them by hand. Each candidate
+          still gets the same live verification a manual Add server does, so ones that don&apos;t
+          actually work (wrong software, offline) are skipped automatically.
+        </PageInfo>
+      </div>
       <div className="card">
         {fediDbSync === "loading" ? (
           <p className="text-dim">Loading…</p>
@@ -1161,11 +1216,12 @@ export function AdminTab() {
         )}
       </div>
 
-      <h2 style={{ marginTop: "1.5rem" }}>Fediverse directory links</h2>
-      <p className="text-faint">
-        External discovery links shown on the Search page (people/servers) and here (developer) —
-        there's no crawled index of the fediverse for Gibrr to query itself.
-      </p>
+      <div style={{ marginTop: "1.5rem" }}>
+        <PageInfo title="Fediverse directory links" level="h2">
+          External discovery links shown on the Search page (people/servers) and here (developer) —
+          there&apos;s no crawled index of the fediverse for Gibrr to query itself.
+        </PageInfo>
+      </div>
       <div className="card">
         <form onSubmit={handleAddDirectoryLink} style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem" }}>
           <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -1250,8 +1306,11 @@ export function AdminTab() {
         )}
       </div>
 
-      <h2 style={{ marginTop: "1.5rem" }}>Custom emoji</h2>
-      <p className="text-faint">Usable in the reaction picker on any Gib, alongside built-in unicode emoji.</p>
+      <div style={{ marginTop: "1.5rem" }}>
+        <PageInfo title="Custom emoji" level="h2">
+          Usable in the reaction picker on any Gib, alongside built-in unicode emoji.
+        </PageInfo>
+      </div>
       <div className="card">
         <form
           onSubmit={handleAddCustomEmoji}

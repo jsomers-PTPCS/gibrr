@@ -93,7 +93,11 @@ export default function StarterKitPage() {
       {pack.members.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>
           {pack.members.map((member) => (
-            <li key={member.id} className="card" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <li
+              key={member.id}
+              className="card"
+              style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: 0 }}
+            >
               <Avatar
                 name={member.displayName ?? member.username}
                 size={40}
@@ -101,8 +105,20 @@ export default function StarterKitPage() {
                 preset={member.avatarPreset}
               />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <strong>{member.displayName ?? member.username}</strong>
-                <div className="text-dim" style={{ fontSize: "0.85rem" }}>
+                <strong
+                  style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                >
+                  {member.displayName ?? member.username}
+                </strong>
+                <div
+                  className="text-dim"
+                  style={{
+                    fontSize: "0.85rem",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
                   @{member.username}@{member.domain}
                 </div>
               </div>

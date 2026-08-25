@@ -113,7 +113,11 @@ export function AntennasTab() {
       {Array.isArray(antennas) && antennas.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>
           {antennas.map((antenna) => (
-            <li key={antenna.id} className="card" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <li
+              key={antenna.id}
+              className="card"
+              style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: 0 }}
+            >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <Link href={`/antennas/${antenna.id}`} style={{ fontWeight: 600 }}>
                   {antenna.name}

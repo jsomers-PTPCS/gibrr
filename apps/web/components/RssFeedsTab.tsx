@@ -100,9 +100,13 @@ export function RssFeedsTab() {
       {Array.isArray(subscriptions) && subscriptions.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>
           {subscriptions.map((sub) => (
-            <li key={sub.id} className="card" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <li
+              key={sub.id}
+              className="card"
+              style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: 0 }}
+            >
               <div style={{ flex: 1, minWidth: 0 }}>
-                <strong>{sub.title ?? sub.url}</strong>
+                <strong style={{ overflowWrap: "anywhere" }}>{sub.title ?? sub.url}</strong>
                 {sub.title && (
                   <p className="text-faint" style={{ margin: "0.2rem 0 0", overflowWrap: "anywhere" }}>
                     {sub.url}

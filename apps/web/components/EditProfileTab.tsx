@@ -27,6 +27,7 @@ import {
   RELATIONSHIP_STATUS_LABELS,
   type RelationshipStatus,
 } from "../lib/relationshipStatus";
+import { PageInfo } from "./PageInfo";
 
 function toDateInputValue(iso: string | null): string {
   return iso ? iso.slice(0, 10) : "";
@@ -349,17 +350,15 @@ export function EditProfileTab({ username }: { username: string }) {
         </div>
 
         <div className="card">
-          <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Appearance</h2>
-          <p className="text-faint" style={{ margin: 0 }}>
+          <PageInfo title="Appearance" level="h2">
             Fonts, colors, profile photo, header, and background are on the Account tab.
-          </p>
+          </PageInfo>
         </div>
 
         <div className="card">
-          <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>About</h2>
-          <p className="text-faint" style={{ marginTop: 0 }}>
-            Each field is private by default — toggle "Public" to let other people see it.
-          </p>
+          <PageInfo title="About" level="h2">
+            Each field is private by default — toggle &quot;Public&quot; to let other people see it.
+          </PageInfo>
 
           <div className="field">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -543,11 +542,10 @@ export function EditProfileTab({ username }: { username: string }) {
         </div>
 
         <div className="card">
-          <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Calendar</h2>
-          <p className="text-faint" style={{ marginTop: 0 }}>
+          <PageInfo title="Calendar" level="h2">
             Paste an iCal feed URL, or connect a self-hosted calendar (Nextcloud, Radicale,
             Baïkal, or any CalDAV server) to show upcoming events on your profile.
-          </p>
+          </PageInfo>
 
           {calendarStatus === "loading" ? (
             <p className="text-dim">Loading…</p>
@@ -647,11 +645,10 @@ export function EditProfileTab({ username }: { username: string }) {
         </div>
 
         <div className="card">
-          <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Photos</h2>
-          <p className="text-faint" style={{ marginTop: 0 }}>
-            Albums you create show up on your profile's Photos tab automatically. You can also
+          <PageInfo title="Photos" level="h2">
+            Albums you create show up on your profile&apos;s Photos tab automatically. You can also
             connect a self-hosted Immich server to show its albums there too.
-          </p>
+          </PageInfo>
 
           {immichConnected === "loading" ? (
             <p className="text-dim">Loading…</p>
