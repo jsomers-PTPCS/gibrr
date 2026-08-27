@@ -33,6 +33,7 @@ import { antennasRouter } from "./routes/antennas.js";
 import { starterPacksRouter } from "./routes/starterPacks.js";
 import { exploreRouter } from "./routes/explore.js";
 import { rssRouter } from "./routes/rss.js";
+import { ghostRouter } from "./routes/ghost.js";
 import { translateRouter } from "./routes/translate.js";
 import { UPLOADS_DIR } from "./uploads.js";
 
@@ -128,6 +129,7 @@ export function createApp() {
   app.use(starterPacksRouter);
   app.use(exploreRouter);
   app.use(rssRouter);
+  app.use(ghostRouter);
   app.use(translateRouter);
   app.use(adminRouter);
 

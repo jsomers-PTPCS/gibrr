@@ -2,6 +2,33 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import { getBookwyrmActivity, ApiError, type BookwyrmActivityItem } from "../lib/api";
+import { StarIcon } from "./icons";
+
+// BookWyrm ratings are 0-5 in 0.5 increments; each star's fill is
+// clipped by width rather than swapped for a separate half-star glyph
+// so a rating like 3.5 renders precisely instead of rounding.
+function StarRating({ rating }: { rating: number }) {
+  return (
+    <span
+      style={{ display: "inline-flex", gap: 1, verticalAlign: "middle" }}
+      title={`${rating} / 5 stars`}
+    >
+      {[0, 1, 2, 3, 4].map((i) => {
+        const fill = Math.max(0, Math.min(1, rating - i));
+        return (
+          <span key={i} style={{ position: "relative", width: 15, height: 15, display: "inline-block" }}>
+            <StarIcon width={15} height={15} style={{ position: "absolute", inset: 0, color: "var(--border-bright)" }} />
+            {fill > 0 && (
+              <span style={{ position: "absolute", inset: 0, overflow: "hidden", width: `${fill * 100}%` }}>
+                <StarIcon filled width={15} height={15} style={{ position: "absolute", inset: 0, color: "var(--accent)" }} />
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
 
 export function BookwyrmTab({
   username,
@@ -51,8 +78,21 @@ export function BookwyrmTab({
             style={{ width: 56, height: 84, objectFit: "cover", borderRadius: "var(--radius-sm)", flexShrink: 0 }}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
+            {item.isCurrentlyReading && (
+              <span className="pill" style={{ marginBottom: "0.35rem" }}>
+                📖 Currently reading
+              </span>
+            )}
+            {item.rating !== null && (
+              <div style={{ margin: item.isCurrentlyReading ? "0.35rem 0 0" : "0 0 0.35rem" }}>
+                <StarRating rating={item.rating} />
+              </div>
+            )}
+            {item.reviewName && (
+              <p style={{ margin: "0.35rem 0 0", fontWeight: 600 }}>{item.reviewName}</p>
+            )}
             <div
-              style={{ margin: 0 }}
+              style={{ margin: "0.35rem 0 0" }}
               // BookWyrm's own content HTML, sanitized server-side
               // (federation/bookwyrmActivity.ts) the same way a remote
               // actor's summary is — same rendering approach as

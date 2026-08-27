@@ -350,12 +350,6 @@ export function EditProfileTab({ username }: { username: string }) {
         </div>
 
         <div className="card">
-          <PageInfo title="Appearance" level="h2">
-            Fonts, colors, profile photo, header, and background are on the Account tab.
-          </PageInfo>
-        </div>
-
-        <div className="card">
           <PageInfo title="About" level="h2">
             Each field is private by default — toggle &quot;Public&quot; to let other people see it.
           </PageInfo>

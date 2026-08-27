@@ -1,20 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   getFeed,
   getFederatedDomains,
   getLongformFeed,
+  getGhostBlogSubscriptions,
+  addGhostBlogSubscription,
+  removeGhostBlogSubscription,
+  ApiError,
   type Post,
   type FeedSort,
   type FeedRange,
+  type GhostBlogSubscription,
 } from "../../lib/api";
 import { PostItem } from "../../components/PostItem";
 import { Avatar } from "../../components/Avatar";
 import { FeedFilterBar } from "../../components/FeedFilterBar";
 import { PageInfo } from "../../components/PageInfo";
 import { ExternalLinkIcon, MailIcon } from "../../components/icons";
+import { useConfirm } from "../../components/ConfirmDialog";
 
 // One Ghost article, styled as a card rather than a feed row — a title,
 // an excerpt, and a link out to the real article, not vote buttons and
@@ -117,6 +123,7 @@ function LongformCard({ post }: { post: Post }) {
 // broad enough to actually need narrowing down; Home is already scoped
 // to your own follows/circles/explore subscriptions.
 export default function FederatedPage() {
+  const confirm = useConfirm();
   const [tab, setTab] = useState<"all" | "longform">("all");
   const [posts, setPosts] = useState<Post[] | "loading" | "error">("loading");
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -136,18 +143,81 @@ export default function FederatedPage() {
   // domain — there's no cross-Ghost-network search to call out to (see
   // LongformCard's own comment on explore.ghost.org's lack of an API),
   // so this only ever narrows down blogs Gibrr already knows about, not
-  // a broader directory. Finding a blog Gibrr doesn't have yet still
-  // means browsing Ghost's own directory (the link below) and handing
-  // the Host its domain to add under Host > Explore servers.
+  // a broader directory. Finding a blog Gibrr doesn't have yet means
+  // either browsing Ghost's own directory (the link below) and adding it
+  // yourself right there (see myGhostBlogs below — no Host needed), or,
+  // for a blog you'd rather everyone on this instance see by default,
+  // handing its domain to the Host to add under Host > Explore servers.
   const [longformQuery, setLongformQuery] = useState("");
 
-  useEffect(() => {
-    if (tab !== "longform") return;
+  // The viewer's own personally-added blogs — layered on top of
+  // whatever the Host has already curated (routes/ghost.ts, GET
+  // /explore/longform/feed merges both server-side; this list is just
+  // what powers the "your blogs" section and its Remove buttons).
+  const [myGhostBlogs, setMyGhostBlogs] = useState<GhostBlogSubscription[] | "loading" | "error">("loading");
+  const [newGhostDomain, setNewGhostDomain] = useState("");
+  const [addingGhostBlog, setAddingGhostBlog] = useState(false);
+  const [addGhostBlogError, setAddGhostBlogError] = useState<string | null>(null);
+
+  function refreshLongform() {
     setLongformPosts("loading");
     getLongformFeed()
       .then((res) => setLongformPosts(res.posts))
       .catch(() => setLongformPosts("error"));
+  }
+
+  function refreshMyGhostBlogs() {
+    getGhostBlogSubscriptions()
+      .then(setMyGhostBlogs)
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        setMyGhostBlogs("error");
+      });
+  }
+
+  useEffect(() => {
+    if (tab !== "longform") return;
+    refreshLongform();
+    refreshMyGhostBlogs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  async function handleAddGhostBlog(e: FormEvent) {
+    e.preventDefault();
+    if (!newGhostDomain.trim()) return;
+    setAddingGhostBlog(true);
+    setAddGhostBlogError(null);
+    try {
+      await addGhostBlogSubscription(newGhostDomain.trim());
+      setNewGhostDomain("");
+      refreshMyGhostBlogs();
+      refreshLongform();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (err instanceof ApiError && err.status === 409) {
+        setAddGhostBlogError("You've already added that blog.");
+      } else if (err instanceof ApiError && err.status === 422) {
+        setAddGhostBlogError("Could not verify that as a reachable Ghost blog — check the domain.");
+      } else {
+        setAddGhostBlogError("Could not add that blog — check the domain and try again.");
+      }
+    } finally {
+      setAddingGhostBlog(false);
+    }
+  }
+
+  async function handleRemoveGhostBlog(blog: GhostBlogSubscription) {
+    if (!(await confirm(`Remove "${blog.name ?? blog.domain}" from your Longform tab?`))) return;
+    await removeGhostBlogSubscription(blog.id);
+    refreshMyGhostBlogs();
+    refreshLongform();
+  }
 
   const filteredLongformPosts = useMemo(() => {
     if (!Array.isArray(longformPosts)) return longformPosts;
@@ -277,6 +347,67 @@ export default function FederatedPage() {
 
       {tab === "longform" && (
         <>
+          <form
+            onSubmit={handleAddGhostBlog}
+            className="card"
+            style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "flex-start", marginBottom: "1rem" }}
+          >
+            <input
+              className="input"
+              value={newGhostDomain}
+              onChange={(e) => setNewGhostDomain(e.target.value)}
+              placeholder="Add a Ghost blog by domain — e.g. blog.example.com"
+              style={{ flex: 1, minWidth: 200 }}
+            />
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={addingGhostBlog || !newGhostDomain.trim()}
+            >
+              {addingGhostBlog ? "Adding…" : "Add blog"}
+            </button>
+            {addGhostBlogError && (
+              <p className="error-text" style={{ margin: 0, width: "100%" }}>
+                {addGhostBlogError}
+              </p>
+            )}
+          </form>
+
+          {Array.isArray(myGhostBlogs) && myGhostBlogs.length > 0 && (
+            <ul
+              style={{
+                listStyle: "none",
+                padding: 0,
+                margin: "0 0 1rem",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "0.5rem",
+              }}
+            >
+              {myGhostBlogs.map((blog) => (
+                <li key={blog.id} className="pill" style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                  {blog.name ?? blog.domain}
+                  <button
+                    onClick={() => handleRemoveGhostBlog(blog)}
+                    aria-label={`Remove ${blog.name ?? blog.domain}`}
+                    title="Remove"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "inherit",
+                      cursor: "pointer",
+                      padding: 0,
+                      lineHeight: 1,
+                      fontSize: "1rem",
+                    }}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", margin: "0 0 1rem", alignItems: "center" }}>
             <input
               className="input"
@@ -288,8 +419,10 @@ export default function FederatedPage() {
             {/* Ghost Explore has no public search/directory API to call
                 out to (confirmed live — see LongformCard's comment), so
                 finding a blog not yet in the feed above means browsing
-                Ghost's own directory here, then handing its domain to
-                the Host to add under Host > Explore servers. */}
+                Ghost's own directory here, then adding it yourself with
+                the form above (no Host needed) — or, to make a blog show
+                up for everyone on this instance by default, handing its
+                domain to the Host to add under Host > Explore servers. */}
             <a
               className="btn btn-ghost"
               href="https://explore.ghost.org/"
@@ -306,7 +439,7 @@ export default function FederatedPage() {
             <p className="text-dim">
               {longformQuery
                 ? "No known blog matches that search."
-                : "No Ghost blogs added yet — ask your Host to add one under Host > Explore servers."}
+                : "No Ghost blogs yet — add one above, or ask your Host to add one under Host > Explore servers."}
             </p>
           )}
           {Array.isArray(filteredLongformPosts) && filteredLongformPosts.length > 0 && (

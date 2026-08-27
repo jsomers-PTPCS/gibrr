@@ -476,7 +476,8 @@ select.input:focus {
     order: 4;
     flex-shrink: 0;
   }
-  .nav-account-profile-link {
+  .nav-account-profile-link,
+  .nav-account-switcher {
     display: none;
   }
 }
@@ -694,6 +695,33 @@ select.input:focus {
 
 /* Chat bubbles */
 
+/* The whole chat dock — launcher, popup panel, and the expanded side
+   panel below — always renders in its own fixed light palette,
+   regardless of the site's dark/light [data-theme]. Redeclaring the
+   same custom property NAMES the rest of the app already uses (--bg,
+   --surface, etc.) rather than inventing new --dock-* ones means every
+   descendant that already reads var(--surface-hover)/var(--text)/etc —
+   including shared classes like .text-faint/.pill/.input used inside
+   the dock — automatically inherits these pinned values via ordinary
+   CSS cascade, with no other file needing to change. Values are copied
+   from :root[data-theme="light"] above. --primary/--accent/--danger
+   are deliberately NOT overridden here since they barely move between
+   the two themes already (both are purple/orange in light and dark).
+*/
+.chat-dock-launcher,
+.chat-dock-panel,
+.chat-dock-expanded {
+  --bg: #f4f1fa;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-hover: #f1eafb;
+  --border: #ddd3ee;
+  --border-bright: #c3a9ec;
+  --text: #1c1330;
+  --text-dim: #5a4b78;
+  --text-faint: #8577a0;
+}
+
 .chat-bubble {
   max-width: 70%;
   padding: 0.55rem 0.85rem;
@@ -702,9 +730,13 @@ select.input:focus {
   word-break: break-word;
 }
 
+/* Purple, not orange — orange is reserved for accents (the launcher,
+   unread badges, the active conversation in the expanded contacts
+   column, the Send button) so it reads as "the thing you'd tap," not
+   as your own messages. */
 .chat-bubble-mine {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-bright) 100%);
-  color: var(--accent-text);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-bright) 100%);
+  color: #fff;
   margin-left: auto;
   border-bottom-right-radius: 0.25rem;
 }
@@ -750,12 +782,15 @@ select.input:focus {
   z-index: 100;
 }
 
+/* Orange, not red — an unread count is an accent to tap, not a warning,
+   so it uses the same accent gradient as the launcher/Send button
+   rather than the site's general-purpose --danger red. */
 .chat-dock-badge {
   position: absolute;
   top: -2px;
   right: -2px;
-  background: var(--danger);
-  color: #fff;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-bright) 100%);
+  color: var(--accent-text);
   font-size: 0.7rem;
   font-weight: 700;
   min-width: 18px;
@@ -782,6 +817,76 @@ select.input:focus {
   flex-direction: column;
   overflow: hidden;
   z-index: 100;
+}
+
+/* The expanded, full-height, two-column layout — replaces the small
+   floating panel above while active. Docks to whichever edge Settings'
+   "Chat position" picked (lib/chatDockPrefs.ts); the contacts strip
+   always sits at that true outer edge (ChatDock.tsx swaps which column
+   renders first in the DOM per side) with the message thread between it
+   and the rest of the page, rather than mirroring literally and putting
+   contacts on the inside. */
+.chat-dock-expanded {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: min(480px, 96vw);
+  background: var(--surface);
+  box-shadow: 0 0 32px rgba(0, 0, 0, 0.25);
+  display: flex;
+  z-index: 150;
+}
+
+.chat-dock-expanded-right {
+  right: 0;
+  border-left: 1px solid var(--border);
+}
+
+.chat-dock-expanded-left {
+  left: 0;
+  border-right: 1px solid var(--border);
+}
+
+.chat-dock-expanded-thread {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The "small space" for the people you're messaging — avatar-only, not
+   a full conversation-row list, since it's meant to stay narrow next to
+   the (wider) thread rather than duplicate the popup panel's list. */
+.chat-dock-expanded-contacts {
+  width: 4.5rem;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-dock-expanded-contact {
+  position: relative;
+  justify-content: center;
+  padding: 0.6rem 0;
+  border-radius: 0;
+}
+
+.chat-dock-expanded-contact:hover {
+  background: var(--surface-hover);
+}
+
+/* The currently-open thread's contact, highlighted the same accent
+   orange as everything else you'd tap in this dock. */
+.chat-dock-expanded-contact-active {
+  background: var(--surface-hover);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.chat-dock-expanded-contact .chat-dock-badge {
+  top: 0.2rem;
+  right: 0.6rem;
 }
 
 .chat-dock-header {
@@ -901,6 +1006,17 @@ select.input:focus {
     bottom: calc(3.75rem + env(safe-area-inset-bottom));
     width: auto;
     max-height: calc(100vh - 6rem);
+  }
+
+  /* Full-width above the bottom tab bar instead of a fixed 480px column
+     — there's no room to dock a wide sidebar on a phone screen. */
+  .chat-dock-expanded {
+    left: 0;
+    right: 0;
+    width: auto;
+    bottom: calc(3.75rem + env(safe-area-inset-bottom));
+    border-left: none;
+    border-right: none;
   }
 }
 

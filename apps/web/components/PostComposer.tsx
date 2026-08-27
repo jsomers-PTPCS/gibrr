@@ -44,6 +44,7 @@ export function PostComposer({
   const [contentWarning, setContentWarning] = useState("");
   const [showContentWarning, setShowContentWarning] = useState(false);
   const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [sensitive, setSensitive] = useState(false);
   const [postLocation, setPostLocation] = useState("");
   const [isEvent, setIsEvent] = useState(false);
   const [eventStart, setEventStart] = useState("");
@@ -124,6 +125,7 @@ export function PostComposer({
         url: url || undefined,
         body: body || undefined,
         contentWarning: showContentWarning && contentWarning ? contentWarning : undefined,
+        sensitive: mediaFile ? sensitive : undefined,
         eventStart: isEvent && eventStart ? new Date(eventStart).toISOString() : undefined,
         eventEnd: isEvent && eventEnd ? new Date(eventEnd).toISOString() : undefined,
         eventLocation: isEvent && eventLocation ? eventLocation : undefined,
@@ -140,6 +142,7 @@ export function PostComposer({
       setContentWarning("");
       setShowContentWarning(false);
       setMediaFile(null);
+      setSensitive(false);
       setPostLocation("");
       setIsEvent(false);
       setEventStart("");
@@ -238,6 +241,16 @@ export function PostComposer({
             onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)}
           />
         </label>
+        {mediaFile && (
+          <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", margin: "0.5rem 0" }}>
+            <input
+              type="checkbox"
+              checked={sensitive}
+              onChange={(e) => setSensitive(e.target.checked)}
+            />
+            🔞 Sensitive media (blurred until clicked)
+          </label>
+        )}
         {!communityId && (
           <label className="field">
             Visibility

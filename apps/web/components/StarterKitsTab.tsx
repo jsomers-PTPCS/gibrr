@@ -10,6 +10,7 @@ import {
   followAllInStarterPack,
   ApiError,
   type StarterPack,
+  type StarterPackSort,
 } from "../lib/api";
 import { useConfirm } from "./ConfirmDialog";
 import { Avatar } from "./Avatar";
@@ -23,6 +24,13 @@ import { ShareMenu } from "./ShareMenu";
 // individual follow buttons lives at app/starter-kits/[id]/page.tsx,
 // which stays a standalone route.
 const MAX_MEMBER_STACK = 6;
+
+const SORT_OPTIONS: { value: StarterPackSort; label: string }[] = [
+  { value: "newest", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
+  { value: "members", label: "Most members" },
+  { value: "name", label: "Name (A–Z)" },
+];
 
 export function StarterKitsTab() {
   const confirm = useConfirm();
@@ -38,8 +46,13 @@ export function StarterKitsTab() {
   const [followingId, setFollowingId] = useState<string | null>(null);
   const [followResult, setFollowResult] = useState<{ id: string; text: string } | null>(null);
 
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState<StarterPackSort>("newest");
+  const [mineOnly, setMineOnly] = useState(false);
+  const hasActiveFilter = q.trim() !== "" || sort !== "newest" || mineOnly;
+
   function refresh() {
-    getStarterPacks()
+    getStarterPacks({ q: q.trim() || undefined, sort, mine: mineOnly || undefined })
       .then(setPacks)
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
@@ -50,7 +63,14 @@ export function StarterKitsTab() {
       });
   }
 
-  useEffect(refresh, []);
+  // Debounced the same 400ms way AdminTab's relay directory search is —
+  // covers sort/mine changes too (not just typing), so a click doesn't
+  // race a still-in-flight request from the previous one.
+  useEffect(() => {
+    const timer = setTimeout(refresh, 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, sort, mineOnly]);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -187,10 +207,58 @@ export function StarterKitsTab() {
         </button>
       </form>
 
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: "0.5rem",
+          marginBottom: "1rem",
+        }}
+      >
+        <input
+          className="input"
+          placeholder="Search starter kits…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{ flex: "1 1 12rem", minWidth: 0 }}
+        />
+        <select
+          className="input"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as StarterPackSort)}
+          style={{ flex: "0 0 auto" }}
+        >
+          {SORT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", whiteSpace: "nowrap" }}>
+          <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} />
+          My kits only
+        </label>
+        {hasActiveFilter && (
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              setQ("");
+              setSort("newest");
+              setMineOnly(false);
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       {packs === "loading" && <p className="text-dim">Loading…</p>}
       {packs === "error" && <p className="error-text">Could not load starter kits.</p>}
       {Array.isArray(packs) && packs.length === 0 && (
-        <p className="text-dim">No starter kits yet — create one above.</p>
+        <p className="text-dim">
+          {hasActiveFilter ? "No starter kits match this search/filter." : "No starter kits yet — create one above."}
+        </p>
       )}
       {Array.isArray(packs) && packs.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>

@@ -10,7 +10,12 @@ import { acceptActivity } from "../federation/activities.js";
 import { localDomain } from "../federation/localActor.js";
 import { toPlainText } from "../federation/plainText.js";
 import { extractHashtagTokens } from "../federation/textEntities.js";
-import { parseContentWarning, parseAttachmentMedia, resolveAndCacheRemotePost } from "../federation/remotePost.js";
+import {
+  parseContentWarning,
+  parseSensitive,
+  parseAttachmentMedia,
+  resolveAndCacheRemotePost,
+} from "../federation/remotePost.js";
 import { deletePosts, deleteCommentSubtree } from "../deletion.js";
 import { isDomainBlocked } from "../federation/domainBlocks.js";
 
@@ -326,6 +331,7 @@ async function processIncomingNote(remote: Actor, note: Record<string, unknown>)
   // code path for local and federated content either way.
   const hashtags = extractHashtagTokens(body);
   const contentWarning = parseContentWarning(note);
+  const sensitive = parseSensitive(note);
 
   // A poll arrives as a Question (federation/activities.ts's
   // createNoteFromPost) — oneOf (single-select) or anyOf (multi-select),
@@ -352,6 +358,7 @@ async function processIncomingNote(remote: Actor, note: Record<string, unknown>)
       createdAt,
       hashtags,
       contentWarning,
+      sensitive,
       ...media,
       ...(pollOptionTexts.length > 0
         ? {
@@ -361,7 +368,7 @@ async function processIncomingNote(remote: Actor, note: Record<string, unknown>)
           }
         : {}),
     },
-    update: { body, hashtags, contentWarning, ...media },
+    update: { body, hashtags, contentWarning, sensitive, ...media },
   });
   console.log(`[inbox] cached a post from ${remote.username}@${remote.domain}`);
 }
@@ -507,6 +514,7 @@ async function processIncomingUpdate(remote: Actor, object: unknown): Promise<vo
         updatedAt: new Date(),
         hashtags: extractHashtagTokens(body),
         contentWarning: parseContentWarning(obj),
+        sensitive: parseSensitive(obj),
         ...parseAttachmentMedia(obj),
       },
     });

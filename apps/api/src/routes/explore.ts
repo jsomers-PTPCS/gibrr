@@ -195,28 +195,40 @@ exploreRouter.get("/explore/loops/servers", requireAuth, async (_req, res) => {
 });
 
 // GET /explore/longform/feed -> a live, aggregated article feed across
-// every Host-curated server detected as Ghost software — the Longform
-// tab on the Federated page (app/federated/page.tsx), kept separate
-// from the ordinary short-post feed since a card built for a blog post
-// (title, excerpt, "read full article" out to the origin) reads
-// completely differently from a Note row. Same "resolve each into a
-// real Post" approach as the Loops feed above, so titles/bodies come
-// from the same cache remotePost.ts already fills in for any other
-// Ghost article (clicking "View" on one, an inbox delivery, etc.) —
-// just aggregated live across every subscribed blog instead of waiting
-// on one. Unlike Loops, there's no remoteCounts to attach: confirmed
-// live (see federation/remoteEngagement.ts) that Ghost's AP objects
-// carry no likes/shares/comments at all, so remoteEngagement is just
-// left unset here, same as any ordinary post.
+// every Host-curated server detected as Ghost software, PLUS whatever
+// Ghost blogs this particular viewer has personally added (see
+// GhostBlog/GhostSubscription's own schema comments, and POST
+// /ghost-blogs/subscriptions below) — the Longform tab on the Federated
+// page (app/federated/page.tsx), kept separate from the ordinary
+// short-post feed since a card built for a blog post (title, excerpt,
+// "read full article" out to the origin) reads completely differently
+// from a Note row. Same "resolve each into a real Post" approach as the
+// Loops feed above, so titles/bodies come from the same cache
+// remotePost.ts already fills in for any other Ghost article (clicking
+// "View" on one, an inbox delivery, etc.) — just aggregated live across
+// every domain instead of waiting on one. Unlike Loops, there's no
+// remoteCounts to attach: confirmed live (see
+// federation/remoteEngagement.ts) that Ghost's AP objects carry no
+// likes/shares/comments at all, so remoteEngagement is just left unset
+// here, same as any ordinary post.
 exploreRouter.get("/explore/longform/feed", requireAuth, async (req, res) => {
   const ghostServers = await findServersBySoftware("Ghost");
+  const personalBlogs = await prisma.ghostBlog.findMany({
+    where: { subscriptions: { some: { actorId: req.actor!.id } } },
+  });
 
-  if (ghostServers.length === 0) return res.json({ posts: [] });
+  // Deduped by domain — a viewer might personally add a blog the Host
+  // has also already curated into Explore; no reason to fetch it twice.
+  const domains = new Set<string>();
+  for (const server of ghostServers) domains.add(server.domain);
+  for (const blog of personalBlogs) domains.add(blog.domain);
+
+  if (domains.size === 0) return res.json({ posts: [] });
 
   const instanceActor = await getOrCreateInstanceActor();
   const postIdLists = await Promise.all(
-    ghostServers.map(async (server) => {
-      const statuses = await fetchGhostTimeline(server.domain, 20);
+    [...domains].map(async (domain) => {
+      const statuses = await fetchGhostTimeline(domain, 20);
       if (!statuses) return [];
       const ids = await Promise.all(
         statuses.map((status) => resolveAndCacheRemotePost(status.url, instanceActor).catch(() => null)),

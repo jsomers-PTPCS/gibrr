@@ -115,6 +115,11 @@ export interface Post {
   // AP's `summary` field, despite the name — the warning text shown
   // before body/media are revealed. Null means no CW.
   contentWarning: string | null;
+  // Marks media (imageUrl/videoUrl) as sensitive/NSFW — blurred until
+  // clicked, independent of contentWarning (see schema.prisma's
+  // Post.sensitive). A non-null contentWarning already implies this
+  // visually in PostItem.tsx, since revealing the CW reveals everything.
+  sensitive: boolean;
   reactions: ReactionSummary[];
   myReaction: string | null;
   poll: Poll | null;
@@ -282,6 +287,27 @@ export function logout() {
   return apiFetch<void>("/auth/logout", { method: "POST" });
 }
 
+// Account switcher — every account signed in on this browser at once.
+// See auth/session.ts's session-pool cookie for how this is tracked
+// server-side.
+export interface SessionAccount {
+  actor: ActorSummary & {
+    id: string;
+    avatarImageUrl: string | null;
+    avatarPreset: AvatarPresetKey | null;
+  };
+  isAdmin: boolean;
+  current: boolean;
+}
+
+export function getSessions() {
+  return apiFetch<SessionAccount[]>("/auth/sessions");
+}
+
+export function switchAccount(actorId: string) {
+  return apiFetch<Me>("/auth/switch", { method: "POST", body: JSON.stringify({ actorId }) });
+}
+
 // Enrollment: setup generates a secret + QR code (not yet enforced),
 // enable proves a real code from it and turns enforcement on, disable
 // re-checks the password and turns it back off. See routes/auth.ts.
@@ -438,6 +464,7 @@ export function createPost(input: {
   url?: string;
   body?: string;
   contentWarning?: string;
+  sensitive?: boolean;
   eventStart?: string;
   eventEnd?: string;
   eventLocation?: string;
@@ -478,6 +505,7 @@ export function updatePost(
     url?: string | null;
     body?: string | null;
     contentWarning?: string | null;
+    sensitive?: boolean;
     imageUrl?: string | null;
     videoUrl?: string | null;
     location?: string | null;
@@ -657,8 +685,18 @@ export interface StarterPack {
   isOwner: boolean;
 }
 
-export function getStarterPacks() {
-  return apiFetch<StarterPack[]>("/starter-packs");
+// "members" (most members first) isn't a stored column — the API sorts
+// the already-resolved array in memory for that one, same reasoning as
+// routes/starterPacks.ts's own comment.
+export type StarterPackSort = "newest" | "oldest" | "name" | "members";
+
+export function getStarterPacks(filters?: { q?: string; sort?: StarterPackSort; mine?: boolean }) {
+  const params = new URLSearchParams();
+  if (filters?.q) params.set("q", filters.q);
+  if (filters?.sort && filters.sort !== "newest") params.set("sort", filters.sort);
+  if (filters?.mine) params.set("mine", "true");
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<StarterPack[]>(`/starter-packs${query}`);
 }
 
 export function getStarterPack(id: string) {
@@ -720,6 +758,32 @@ export function removeRssSubscription(id: string) {
   return apiFetch<void>(`/rss/subscriptions/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+// A Ghost blog the viewer has personally added to their own Longform
+// tab, layered on top of whatever the Host has already curated into
+// Explore — see routes/ghost.ts and GET /explore/longform/feed, which
+// merges both.
+export interface GhostBlogSubscription {
+  id: string;
+  blogId: string;
+  domain: string;
+  name: string | null;
+}
+
+export function getGhostBlogSubscriptions() {
+  return apiFetch<GhostBlogSubscription[]>("/ghost-blogs/subscriptions");
+}
+
+export function addGhostBlogSubscription(domain: string) {
+  return apiFetch<GhostBlogSubscription>("/ghost-blogs/subscriptions", {
+    method: "POST",
+    body: JSON.stringify({ domain }),
+  });
+}
+
+export function removeGhostBlogSubscription(id: string) {
+  return apiFetch<void>(`/ghost-blogs/subscriptions/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 // Self-hosted-only (federation/translate.ts) — an empty language list
 // means the Host hasn't set up LIBRETRANSLATE_URL, or it's still
 // downloading its language models; either way, the frontend just hides
@@ -755,13 +819,11 @@ export function translateText(text: string, target: string) {
   });
 }
 
-// `sync: false` skips the server's own live reply-sync (routes/comments.ts)
-// and just returns whatever's already cached — for an instant first
-// paint; PostComments.tsx follows up with a normal (synced) call right
-// after to pick up anything new.
-export function getComments(postId: string, options?: { sync?: boolean }) {
-  const query = options?.sync === false ? "?sync=0" : "";
-  return apiFetch<Comment[]>(`/posts/${encodeURIComponent(postId)}/comments${query}`);
+// Always answers from the DB immediately (routes/comments.ts) — a stale
+// remote post's reply thread gets re-crawled in the background there,
+// not awaited by this request.
+export function getComments(postId: string) {
+  return apiFetch<Comment[]>(`/posts/${encodeURIComponent(postId)}/comments`);
 }
 
 export function createComment(postId: string, input: { body: string; parentId?: string }) {
@@ -826,6 +888,9 @@ export interface BookwyrmActivityItem {
   bookTitle: string | null;
   bookCoverUrl: string;
   publishedAt: string;
+  reviewName: string | null;
+  rating: number | null;
+  isCurrentlyReading: boolean;
 }
 
 export function getBookwyrmActivity(username: string) {

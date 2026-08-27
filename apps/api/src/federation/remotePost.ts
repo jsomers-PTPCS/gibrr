@@ -22,6 +22,15 @@ export function parseContentWarning(note: Record<string, unknown>): string | nul
   return typeof note.summary === "string" && note.summary.trim().length > 0 ? note.summary : null;
 }
 
+// The AP `sensitive` boolean, read independently of `summary` — plenty
+// of real posts (confirmed live: Mastodon's own "mark media as
+// sensitive" toggle) set this true with no CW text at all, which
+// parseContentWarning alone would silently drop. Same Article/Event
+// caveat as parseContentWarning: only meaningful on a Note.
+export function parseSensitive(note: Record<string, unknown>): boolean {
+  return note.sensitive === true;
+}
+
 // Parses an incoming Note's `attachment` field into imageUrl/videoUrl —
 // tolerant of both shapes real servers send (a single object, or the
 // array Mastodon actually uses). Takes the first entry whose mediaType
@@ -221,6 +230,7 @@ export async function resolveAndCacheRemotePost(
       hashtags: extractHashtagTokens(body),
       ...eventFields,
       contentWarning: type === "Event" || type === "Article" ? null : parseContentWarning(fetched),
+      sensitive: type === "Event" || type === "Article" ? false : parseSensitive(fetched),
       ...media,
     },
     // Backfills url for a post cached before this field was captured —

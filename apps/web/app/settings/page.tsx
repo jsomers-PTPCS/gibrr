@@ -4,6 +4,12 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { getTheme, setTheme, type Theme } from "../../lib/theme";
 import {
+  getSensitiveMediaDisplay,
+  setSensitiveMediaDisplay,
+  type SensitiveMediaDisplay,
+} from "../../lib/mediaPrefs";
+import { getChatDockSide, setChatDockSide, type ChatDockSide } from "../../lib/chatDockPrefs";
+import {
   getMe,
   getProfile,
   updateProfile,
@@ -59,6 +65,8 @@ export default function SettingsPage() {
   }, []);
 
   const [theme, setThemeState] = useState<Theme>("dark");
+  const [sensitiveMediaDisplay, setSensitiveMediaDisplayState] = useState<SensitiveMediaDisplay>("blur");
+  const [chatDockSide, setChatDockSideState] = useState<ChatDockSide>("right");
 
   const [me, setMe] = useState<Me | null | "loading">("loading");
   const [profile, setProfile] = useState<Profile | "loading" | "error">("loading");
@@ -109,6 +117,8 @@ export default function SettingsPage() {
 
   useEffect(() => {
     setThemeState(getTheme());
+    setSensitiveMediaDisplayState(getSensitiveMediaDisplay());
+    setChatDockSideState(getChatDockSide());
     getMe()
       .then((m) => {
         setMe(m);
@@ -200,6 +210,16 @@ export default function SettingsPage() {
   function choose(next: Theme) {
     setTheme(next);
     setThemeState(next);
+  }
+
+  function chooseSensitiveMediaDisplay(next: SensitiveMediaDisplay) {
+    setSensitiveMediaDisplay(next);
+    setSensitiveMediaDisplayState(next);
+  }
+
+  function chooseChatDockSide(next: ChatDockSide) {
+    setChatDockSide(next);
+    setChatDockSideState(next);
   }
 
   async function handleGenerateExportLink() {
@@ -332,6 +352,48 @@ export default function SettingsPage() {
             onClick={() => choose("light")}
           >
             Light
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <PageInfo title="Sensitive media" level="h2">
+          Control how posts marked sensitive/NSFW — or carrying a content warning — display their
+          media. This only affects your own browser, not what you post.
+        </PageInfo>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button
+            className={`btn ${sensitiveMediaDisplay === "blur" ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => chooseSensitiveMediaDisplay("blur")}
+          >
+            🔞 Blur until clicked
+          </button>
+          <button
+            className={`btn ${sensitiveMediaDisplay === "show" ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => chooseSensitiveMediaDisplay("show")}
+          >
+            Always show
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <PageInfo title="Chat position" level="h2">
+          Which side of the screen the expanded Whispers chat docks to. The floating launcher in
+          the corner is unaffected.
+        </PageInfo>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button
+            className={`btn ${chatDockSide === "left" ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => chooseChatDockSide("left")}
+          >
+            Left
+          </button>
+          <button
+            className={`btn ${chatDockSide === "right" ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => chooseChatDockSide("right")}
+          >
+            Right
           </button>
         </div>
       </div>

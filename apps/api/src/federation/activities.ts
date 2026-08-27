@@ -182,7 +182,11 @@ export function createNoteFromPost(
     // The AP `summary` field on a Note is, despite the name, the
     // content-warning text shown before the real content — real
     // Mastodon/Friendica convention, not this app inventing a field.
-    ...(post.contentWarning ? { summary: post.contentWarning, sensitive: true } : {}),
+    // `sensitive` is federated whenever either a CW is set or the post's
+    // own (CW-independent) sensitive/NSFW flag is — see schema.prisma's
+    // Post.sensitive.
+    ...(post.contentWarning ? { summary: post.contentWarning } : {}),
+    ...(post.contentWarning || post.sensitive ? { sensitive: true } : {}),
     ...(attachment.length > 0 ? { attachment } : {}),
     ...(tag.length > 0 ? { tag } : {}),
     ...pollFields,

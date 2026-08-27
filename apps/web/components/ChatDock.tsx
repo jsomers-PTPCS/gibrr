@@ -16,6 +16,7 @@ import { Avatar } from "./Avatar";
 import { MessageIcon } from "./MessageIcon";
 import { timeAgo } from "../lib/timeAgo";
 import { onOpenChatDock, onToggleChatDockList, onShareToChatDock } from "../lib/chatDock";
+import { getChatDockSide, onChatDockSideChange, type ChatDockSide } from "../lib/chatDockPrefs";
 
 const LIST_POLL_MS = 10000;
 const THREAD_POLL_MS = 3000;
@@ -45,10 +46,23 @@ export function ChatDock() {
   const [pendingShare, setPendingShare] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // The full-height, two-column right-or-left sidebar (Settings' "Chat
+  // position") — an alternative top-level layout to the small floating
+  // panel above, not a third `View` state, since it shows the
+  // conversation list and an open thread at once rather than switching
+  // between them.
+  const [expanded, setExpanded] = useState(false);
+  const [chatDockSide, setChatDockSide] = useState<ChatDockSide>("right");
+
   useEffect(() => {
     getMe()
       .then(setMe)
       .catch(() => setMe(null));
+  }, []);
+
+  useEffect(() => {
+    setChatDockSide(getChatDockSide());
+    return onChatDockSideChange(setChatDockSide);
   }, []);
 
   // The conversation list drives the unread badge, so it's polled
@@ -64,14 +78,14 @@ export function ChatDock() {
   }, [me]);
 
   useEffect(() => {
-    if (view !== "thread" || !activeId) return;
+    if ((view !== "thread" && !expanded) || !activeId) return;
     function refresh() {
       getMessages(activeId!).then(setMessages).catch(() => {});
     }
     refresh();
     const interval = setInterval(refresh, THREAD_POLL_MS);
     return () => clearInterval(interval);
-  }, [view, activeId]);
+  }, [view, expanded, activeId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
@@ -101,6 +115,27 @@ export function ChatDock() {
       setView("list");
     });
   }, []);
+
+  // Shared by the popup list's rows and the expanded layout's contacts
+  // column — the only difference between them is that the popup also
+  // switches `view` to show the thread in place of the list, which is
+  // meaningless while `expanded` already shows both at once.
+  function selectConversation(c: ConversationSummary) {
+    const name = c.otherActor?.displayName ?? c.otherActor?.username ?? "Unknown";
+    setActiveId(c.id);
+    setActiveOtherName(name);
+    setMessages("loading");
+    if (!expanded) setView("thread");
+    if (pendingShare) {
+      setDraft(pendingShare);
+      setPendingShare(null);
+    }
+  }
+
+  function handleExpand() {
+    if (!activeId && conversations.length > 0) selectConversation(conversations[0]);
+    setExpanded(true);
+  }
 
   async function handleSend(e: FormEvent) {
     e.preventDefault();
@@ -150,6 +185,134 @@ export function ChatDock() {
 
   const unreadTotal = conversations.reduce((sum, c) => sum + c.unreadCount, 0);
 
+  // Shared by the popup panel's thread view and the expanded layout's
+  // thread column — identical bubble markup either way.
+  function renderMessageBubbles() {
+    if (messages === "loading") return <p className="text-dim">Loading…</p>;
+    return messages.map((m) => {
+      const isMine = m.senderActorId === me!.actor.id;
+      return (
+        <div key={m.id} className={`chat-bubble ${isMine ? "chat-bubble-mine" : "chat-bubble-theirs"}`}>
+          {m.body}
+          <div className="text-faint" style={{ fontSize: "0.7rem", marginTop: "0.2rem" }}>
+            {timeAgo(m.createdAt)}
+          </div>
+        </div>
+      );
+    });
+  }
+
+  if (expanded) {
+    const contactsColumn = (
+      <div className="chat-dock-expanded-contacts">
+        <div className="chat-dock-header" style={{ justifyContent: "center" }}>
+          <button
+            className="chat-dock-close"
+            onClick={() => {
+              setExpanded(false);
+              setView("collapsed");
+            }}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="chat-dock-body" style={{ padding: "0.5rem 0" }}>
+          {conversations.map((c) => {
+            const name = c.otherActor?.displayName ?? c.otherActor?.username ?? "Unknown";
+            return (
+              <button
+                key={c.id}
+                className={`chat-dock-conversation chat-dock-expanded-contact${
+                  activeId === c.id ? " chat-dock-expanded-contact-active" : ""
+                }`}
+                onClick={() => selectConversation(c)}
+                title={name}
+              >
+                <Avatar name={name} size={36} />
+                {c.unreadCount > 0 && (
+                  <span className="chat-dock-badge">{c.unreadCount > 9 ? "9+" : c.unreadCount}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+
+    const threadColumn = (
+      <div className="chat-dock-expanded-thread">
+        <div className="chat-dock-header">
+          {activeOtherName ? (
+            <>
+              <Avatar name={activeOtherName} size={24} />
+              <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {activeOtherName}
+              </strong>
+            </>
+          ) : (
+            <strong>Whispers</strong>
+          )}
+          <button
+            className="chat-dock-back"
+            onClick={() => {
+              setExpanded(false);
+              setView(activeId ? "thread" : "list");
+            }}
+            aria-label="Collapse"
+            title="Collapse"
+            style={{ marginLeft: "auto" }}
+          >
+            ⤡
+          </button>
+        </div>
+        <div className="chat-dock-body chat-dock-thread">
+          {activeId ? (
+            renderMessageBubbles()
+          ) : (
+            <p className="text-dim">Pick someone from the list to see your whispers.</p>
+          )}
+          <div ref={bottomRef} />
+        </div>
+        {activeId && (
+          <form onSubmit={handleSend} className="chat-dock-footer">
+            <input
+              className="input"
+              style={{ flex: 1, minWidth: 0 }}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Type a whisper…"
+            />
+            <button
+              type="submit"
+              className="btn btn-accent"
+              disabled={sending}
+              style={{ padding: "0.5rem 0.75rem", flexShrink: 0 }}
+            >
+              Send
+            </button>
+          </form>
+        )}
+      </div>
+    );
+
+    return (
+      <div className={`chat-dock-expanded chat-dock-expanded-${chatDockSide}`}>
+        {chatDockSide === "right" ? (
+          <>
+            {threadColumn}
+            {contactsColumn}
+          </>
+        ) : (
+          <>
+            {contactsColumn}
+            {threadColumn}
+          </>
+        )}
+      </div>
+    );
+  }
+
   if (view === "collapsed") {
     return (
       <button
@@ -169,6 +332,15 @@ export function ChatDock() {
         <>
           <div className="chat-dock-header">
             <strong>Whispers</strong>
+            <button
+              className="chat-dock-back"
+              onClick={handleExpand}
+              aria-label="Expand"
+              title="Expand"
+              style={{ marginLeft: "auto" }}
+            >
+              ⤢
+            </button>
             <button
               className="chat-dock-close"
               onClick={() => {
@@ -223,16 +395,7 @@ export function ChatDock() {
                   <button
                     key={c.id}
                     className="conversation-row chat-dock-conversation"
-                    onClick={() => {
-                      setActiveId(c.id);
-                      setActiveOtherName(name);
-                      setMessages("loading");
-                      setView("thread");
-                      if (pendingShare) {
-                        setDraft(pendingShare);
-                        setPendingShare(null);
-                      }
-                    }}
+                    onClick={() => selectConversation(c)}
                   >
                     <Avatar name={name} size={40} />
                     <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
@@ -278,30 +441,20 @@ export function ChatDock() {
               </>
             )}
             <button
-              className="chat-dock-close"
-              onClick={() => setView("collapsed")}
-              aria-label="Close"
+              className="chat-dock-back"
+              onClick={handleExpand}
+              aria-label="Expand"
+              title="Expand"
               style={{ marginLeft: "auto" }}
             >
+              ⤢
+            </button>
+            <button className="chat-dock-close" onClick={() => setView("collapsed")} aria-label="Close">
               ×
             </button>
           </div>
           <div className="chat-dock-body chat-dock-thread">
-            {messages === "loading" ? (
-              <p className="text-dim">Loading…</p>
-            ) : (
-              messages.map((m) => {
-                const isMine = m.senderActorId === me.actor.id;
-                return (
-                  <div key={m.id} className={`chat-bubble ${isMine ? "chat-bubble-mine" : "chat-bubble-theirs"}`}>
-                    {m.body}
-                    <div className="text-faint" style={{ fontSize: "0.7rem", marginTop: "0.2rem" }}>
-                      {timeAgo(m.createdAt)}
-                    </div>
-                  </div>
-                );
-              })
-            )}
+            {renderMessageBubbles()}
             <div ref={bottomRef} />
           </div>
           <form onSubmit={handleSend} className="chat-dock-footer">

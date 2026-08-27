@@ -129,6 +129,7 @@ model Actor {
   // person/group actor.
   rssFeed              RssFeed?
   rssSubscriptions     RssSubscription[]
+  ghostSubscriptions   GhostSubscription[]
 
   conversationParticipants ConversationParticipant[]
   sentMessages             Message[]
@@ -394,6 +395,20 @@ model Post {
   // (federation/activities.ts's postObjectIri) instead of a URL we made
   // up for content we don't actually host.
   remoteId      String?  @unique
+  // When this remote post's reply thread was last walked live
+  // (federation/remoteEngagement.ts's syncRemoteReplies) — null means
+  // never. GET /posts/:postId/comments (routes/comments.ts) used to
+  // await that live crawl inline on every single request, which is what
+  // made opening a remote post's comments slow (confirmed live: several
+  // seconds against an unfamiliar server, serial per-reply fetches).
+  // This timestamp lets that route serve the DB's already-cached
+  // Comment rows immediately instead, and only kick off a fresh
+  // (non-blocking) crawl when this is null or stale — same
+  // "only recheck once a while" reasoning as ExploreServer's sweep
+  // interval, just gated per-post-on-view instead of a fixed schedule,
+  // since which remote posts anyone's even looking at is unpredictable.
+  // Always null for a local post.
+  commentsLastSyncedAt DateTime?
   createdAt     DateTime @default(now())
   // Set only by an actual edit (routes/posts.ts's PATCH, or an incoming
   // Update over federation) — deliberately not Prisma's automatic
@@ -440,6 +455,16 @@ model Post {
   // warning text shown before the real content — see
   // federation/activities.ts's createNoteFromPost. null means no CW.
   contentWarning String?
+  // Marks media (imageUrl/videoUrl) as sensitive/NSFW — blurred client-
+  // side until clicked, independent of contentWarning: a post can carry
+  // sensitive media with no spoiler text at all, which is the common
+  // case for an incoming remote Note that sets AP `sensitive: true` with
+  // no `summary` (see federation/remotePost.ts's parseSensitive). Any
+  // non-null contentWarning already implies this for federation purposes
+  // (federation/activities.ts's createNoteFromPost sets the outgoing AP
+  // `sensitive` flag whenever either is true), but the two are tracked
+  // separately since a CW is about spoiling text, not necessarily NSFW.
+  sensitive Boolean @default(false)
 
   // A post "has a poll" iff it has any PollOption rows — no separate
   // boolean needed. pollExpiresAt null means it never expires.
@@ -1068,6 +1093,44 @@ model RssCachedPost {
 
   feed RssFeed @relation(fields: [feedId], references: [id])
   post Post    @relation(fields: [postId], references: [id])
+}
+
+// A viewer's own Ghost blog addition to the Longform tab. Unlike
+// RssFeed, a Ghost blog already speaks ActivityPub — federation/
+// ghostExplore.ts's fetchGhostTimeline resolves each post's real remote
+// actor straight from the blog's own outbox — so there's no local
+// pseudo-actor to create here the way RssFeed needs one; cached posts
+// get authored as whatever real remote actor federation/remotePost.ts's
+// resolveAndCacheRemotePost resolves, same as the Host-curated
+// ExploreServer("Ghost") path GET /explore/longform/feed already uses
+// for every other Ghost blog. This table only remembers which domains a
+// viewer has personally added — Longform still fetches live on every
+// request rather than relying on a background sweep, so there's no
+// GhostCachedPost table the way RssCachedPost/ExploreCachedPost exist:
+// nothing needs to ask "which posts came from this blog" after the
+// fact, since that route re-derives it live from the outbox each time.
+model GhostBlog {
+  id        String   @id @default(uuid())
+  domain    String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+
+  subscriptions GhostSubscription[]
+}
+
+// Self-service, same "any user, not just the Host" posture as
+// RssSubscription — layered on top of (not replacing) the Host-curated
+// ExploreServer("Ghost") blogs everyone already sees in Longform.
+model GhostSubscription {
+  id        String   @id @default(uuid())
+  actorId   String
+  blogId    String
+  createdAt DateTime @default(now())
+
+  actor Actor     @relation(fields: [actorId], references: [id])
+  blog  GhostBlog @relation(fields: [blogId], references: [id])
+
+  @@unique([actorId, blogId])
 }
 
 // Singleton row (id is always 1 — see heartbeat.ts, which owns every

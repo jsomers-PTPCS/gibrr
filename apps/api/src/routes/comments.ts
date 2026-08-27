@@ -5,6 +5,7 @@ import { requireAuth, optionalAuth } from "../auth/session.js";
 import { attachCommentVotes } from "../votes.js";
 import { isLocalActor, getOrCreateInstanceActor } from "../federation/localActor.js";
 import { syncRemoteReplies } from "../federation/remoteEngagement.js";
+import { logger } from "../logger.js";
 import {
   createNoteFromComment,
   createActivity,
@@ -38,34 +39,44 @@ commentsRouter.get("/comments/:id", async (req, res) => {
   res.json(createNoteFromComment(comment, comment.author, comment.post));
 });
 
+// How long a remote post's already-cached reply thread is trusted
+// before this route bothers re-walking it live — same "don't hammer
+// every server on every single view" reasoning as ExploreServer's own
+// sweep interval, just gated per-post-on-view instead of a fixed
+// schedule (which remote posts anyone's even looking at is
+// unpredictable, unlike Explore's fixed curated server list).
+const COMMENTS_SYNC_STALE_MS = 5 * 60_000;
+
 // The actual, single choke point for "someone is about to look at this
 // post's comments" — hit whether that's the dedicated post page, a
 // feed's inline "expand comments" accordion (PostItem), or the Loops
 // video drawer, unlike GET /posts/:id's own remote-engagement fetch
 // (which only ever ran for whoever loaded that one dedicated page).
-// Confirmed live: a post viewed only through a feed/Loops never had its
-// real reply thread synced in at all before this, no matter how many
-// times its comments were opened. Reddit has no ActivityPub replies
-// collection to walk (see federation/remoteEngagement.ts), so it's
-// skipped the same way GET /posts/:id already skips it.
+// Reddit has no ActivityPub replies collection to walk (see
+// federation/remoteEngagement.ts), so it's skipped the same way GET
+// /posts/:id already skips it.
 //
-// ?sync=0 skips that live sync and just returns whatever's already
-// cached — confirmed live this sync can take real seconds against a
-// slow/unfamiliar remote server, which used to mean the whole comment
-// drawer sat blank that whole time even when it already had something
-// to show. PostComments.tsx uses this for its own first paint (instant,
-// whatever's cached), then calls this same route again without the
-// param to fetch/apply the fresher, synced result once it's ready —
-// stale-while-revalidate, not a change to what the default response
-// (no query param) does or guarantees.
+// Used to `await syncRemoteReplies(...)` inline, on every single
+// request — confirmed live this took several real seconds against a
+// slow/unfamiliar remote server (a serial per-reply crawl, up to two
+// live HTTP round trips per reply), which is what made opening a remote
+// post's comments feel slow. This now always answers from the DB
+// immediately, the same fast path a local post's comments already take,
+// and only kicks off a live re-sync in the background (not awaited) when
+// this post's thread has never been synced or hasn't been rechecked in
+// a while — an already-open comment panel just won't show a reply that
+// arrived in the last few minutes until the next reload, the same
+// "eventually consistent" tradeoff Explore/Loops' own sweeps already
+// make. commentsLastSyncedAt is stamped *before* the crawl starts
+// (Post.commentsLastSyncedAt's own schema comment), not after, so a
+// burst of near-simultaneous opens of the same popular post only
+// triggers one crawl, not one per request.
 commentsRouter.get("/posts/:postId/comments", optionalAuth, async (req, res) => {
-  const skipSync = req.query.sync === "0";
-  const post = skipSync
-    ? null
-    : await prisma.post.findUnique({
-        where: { id: req.params.postId },
-        select: { id: true, remoteId: true },
-      });
+  const post = await prisma.post.findUnique({
+    where: { id: req.params.postId },
+    select: { id: true, remoteId: true, commentsLastSyncedAt: true },
+  });
+
   if (post?.remoteId) {
     const isReddit = (() => {
       try {
@@ -74,9 +85,15 @@ commentsRouter.get("/posts/:postId/comments", optionalAuth, async (req, res) => 
         return false;
       }
     })();
-    if (!isReddit) {
+    const stale =
+      !post.commentsLastSyncedAt || Date.now() - post.commentsLastSyncedAt.getTime() > COMMENTS_SYNC_STALE_MS;
+
+    if (!isReddit && stale) {
+      await prisma.post.update({ where: { id: post.id }, data: { commentsLastSyncedAt: new Date() } });
       const instanceActor = await getOrCreateInstanceActor();
-      await syncRemoteReplies({ id: post.id, remoteId: post.remoteId }, instanceActor);
+      void syncRemoteReplies({ id: post.id, remoteId: post.remoteId }, instanceActor).catch((err) => {
+        logger.warn({ err, postId: post.id }, "background comment sync failed");
+      });
     }
   }
 

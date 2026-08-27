@@ -31,6 +31,8 @@ import { StarterKitsTab } from "../../components/StarterKitsTab";
 import { Avatar } from "../../components/Avatar";
 import { PageInfo } from "../../components/PageInfo";
 
+const MY_CIRCLES_PAGE_SIZE = 10;
+
 export default function GroupsPage() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
@@ -57,6 +59,21 @@ export default function GroupsPage() {
   // so a live substring filter needs no round trip, unlike Discover's
   // query which hits the search API.
   const [myCirclesQuery, setMyCirclesQuery] = useState("");
+  // Each of My Circles' three lists starts capped at this many items with
+  // its own "Show more" button below — a long circles/following/servers
+  // list otherwise turned this tab into a full-page scroll, same
+  // "10 at a time" precedent as AdminTab's explore-servers pagination,
+  // just growing incrementally here instead of paging back and forth.
+  // Reset together whenever the search narrows the lists, so "Show more"
+  // always starts back at the top 10 of whatever's currently matching.
+  const [visibleGroupsCount, setVisibleGroupsCount] = useState(MY_CIRCLES_PAGE_SIZE);
+  const [visibleFollowingCount, setVisibleFollowingCount] = useState(MY_CIRCLES_PAGE_SIZE);
+  const [visibleServersCount, setVisibleServersCount] = useState(MY_CIRCLES_PAGE_SIZE);
+  useEffect(() => {
+    setVisibleGroupsCount(MY_CIRCLES_PAGE_SIZE);
+    setVisibleFollowingCount(MY_CIRCLES_PAGE_SIZE);
+    setVisibleServersCount(MY_CIRCLES_PAGE_SIZE);
+  }, [myCirclesQuery]);
   // Explore's own search — everything here is already loaded
   // client-side (getExploreServers fetched once up front), so this is
   // a plain substring filter, same posture as myCirclesFilter below.
@@ -293,30 +310,41 @@ export default function GroupsPage() {
                 : "No circles match that search."}
             </p>
           ) : (
-            <ul style={{ listStyle: "none", padding: 0, margin: 0, marginBottom: "1rem" }}>
-              {filteredMyGroups.map((c) => (
-                <li key={c.id} className="card">
-                  <div
-                    style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "1rem" }}
-                  >
-                    <div>
-                      <Link
-                        href={`/g/${c.actor.username}`}
-                        style={{ fontWeight: 700, fontSize: "1.05rem", color: "var(--text)" }}
-                      >
-                        {c.title}
-                      </Link>
-                      <p className="text-faint" style={{ margin: "0.2rem 0" }}>
-                        c/{c.actor.username} · {c.memberCount} member{c.memberCount === 1 ? "" : "s"}
-                      </p>
+            <>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, marginBottom: "1rem" }}>
+                {filteredMyGroups.slice(0, visibleGroupsCount).map((c) => (
+                  <li key={c.id} className="card">
+                    <div
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "1rem" }}
+                    >
+                      <div>
+                        <Link
+                          href={`/g/${c.actor.username}`}
+                          style={{ fontWeight: 700, fontSize: "1.05rem", color: "var(--text)" }}
+                        >
+                          {c.title}
+                        </Link>
+                        <p className="text-faint" style={{ margin: "0.2rem 0" }}>
+                          c/{c.actor.username} · {c.memberCount} member{c.memberCount === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <button className="btn btn-ghost" disabled={joining === c.id} onClick={() => handleLeave(c)}>
+                        Leave
+                      </button>
                     </div>
-                    <button className="btn btn-ghost" disabled={joining === c.id} onClick={() => handleLeave(c)}>
-                      Leave
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+              {filteredMyGroups.length > visibleGroupsCount && (
+                <button
+                  className="btn btn-ghost"
+                  style={{ display: "block", margin: "-0.5rem 0 1rem" }}
+                  onClick={() => setVisibleGroupsCount((v) => v + MY_CIRCLES_PAGE_SIZE)}
+                >
+                  Show more ({filteredMyGroups.length - visibleGroupsCount} more)
+                </button>
+              )}
+            </>
           )}
 
           <h2 style={{ fontSize: "1.1rem" }}>People you&apos;re listening to</h2>
@@ -329,54 +357,65 @@ export default function GroupsPage() {
                 : "No one matches that search."}
             </p>
           ) : (
-            <ul style={{ listStyle: "none", padding: 0, margin: 0, marginBottom: "1rem" }}>
-              {filteredFollowing.map((p) => (
-                <li key={p.id} className="card">
-                  <div
-                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}
-                  >
-                    <Link
-                      href={`/u/${p.username}?domain=${encodeURIComponent(p.domain)}`}
-                      style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: 0, color: "inherit" }}
+            <>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, marginBottom: "1rem" }}>
+                {filteredFollowing.slice(0, visibleFollowingCount).map((p) => (
+                  <li key={p.id} className="card">
+                    <div
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}
                     >
-                      <Avatar
-                        name={p.displayName ?? p.username}
-                        size={40}
-                        imageUrl={p.avatarImageUrl}
-                        preset={p.avatarPreset}
-                      />
-                      <div style={{ minWidth: 0 }}>
-                        <strong>{p.displayName ?? p.username}</strong>
-                        <p className="text-faint" style={{ margin: 0 }}>
-                          @{p.username}@{p.domain}
-                        </p>
-                      </div>
-                    </Link>
-                    <button
-                      className="btn btn-ghost"
-                      disabled={unlistening === p.id}
-                      onClick={() => handleUnlisten(p)}
-                      style={{ flexShrink: 0 }}
-                    >
-                      Unlisten
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                      <Link
+                        href={`/u/${p.username}?domain=${encodeURIComponent(p.domain)}`}
+                        style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: 0, color: "inherit" }}
+                      >
+                        <Avatar
+                          name={p.displayName ?? p.username}
+                          size={40}
+                          imageUrl={p.avatarImageUrl}
+                          preset={p.avatarPreset}
+                        />
+                        <div style={{ minWidth: 0 }}>
+                          <strong>{p.displayName ?? p.username}</strong>
+                          <p className="text-faint" style={{ margin: 0 }}>
+                            @{p.username}@{p.domain}
+                          </p>
+                        </div>
+                      </Link>
+                      <button
+                        className="btn btn-ghost"
+                        disabled={unlistening === p.id}
+                        onClick={() => handleUnlisten(p)}
+                        style={{ flexShrink: 0 }}
+                      >
+                        Unlisten
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              {filteredFollowing.length > visibleFollowingCount && (
+                <button
+                  className="btn btn-ghost"
+                  style={{ display: "block", margin: "-0.5rem 0 1rem" }}
+                  onClick={() => setVisibleFollowingCount((v) => v + MY_CIRCLES_PAGE_SIZE)}
+                >
+                  Show more ({filteredFollowing.length - visibleFollowingCount} more)
+                </button>
+              )}
+            </>
           )}
 
-          {Array.isArray(exploreServers) && exploreServers.some((s) => s.subscribed) && (
-            <>
-              <h3 style={{ fontSize: "1rem" }}>Subscribed servers</h3>
-              <p className="text-faint" style={{ marginTop: 0 }}>
-                Trending posts from these merge into your Home feed — see the Explore tab to
-                manage them.
-              </p>
-              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                {exploreServers
-                  .filter((s) => s.subscribed)
-                  .map((server) => (
+          {Array.isArray(exploreServers) && exploreServers.some((s) => s.subscribed) && (() => {
+            const subscribedServers = exploreServers.filter((s) => s.subscribed);
+            return (
+              <>
+                <h3 style={{ fontSize: "1rem" }}>Subscribed servers</h3>
+                <p className="text-faint" style={{ marginTop: 0 }}>
+                  Trending posts from these merge into your Home feed — see the Explore tab to
+                  manage them.
+                </p>
+                <ul style={{ listStyle: "none", padding: 0, margin: 0, marginBottom: "1rem" }}>
+                  {subscribedServers.slice(0, visibleServersCount).map((server) => (
                     <li key={server.domain} className="card">
                       <Link href={`/explore/${encodeURIComponent(server.domain)}`} style={{ fontWeight: 700, fontSize: "1.05rem" }}>
                         {server.name || server.domain}
@@ -388,9 +427,19 @@ export default function GroupsPage() {
                       )}
                     </li>
                   ))}
-              </ul>
-            </>
-          )}
+                </ul>
+                {subscribedServers.length > visibleServersCount && (
+                  <button
+                    className="btn btn-ghost"
+                    style={{ display: "block", margin: "-0.5rem 0 1rem" }}
+                    onClick={() => setVisibleServersCount((v) => v + MY_CIRCLES_PAGE_SIZE)}
+                  >
+                    Show more ({subscribedServers.length - visibleServersCount} more)
+                  </button>
+                )}
+              </>
+            );
+          })()}
         </>
       )}
 

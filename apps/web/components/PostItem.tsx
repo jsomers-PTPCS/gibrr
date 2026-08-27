@@ -31,6 +31,7 @@ import {
   type TranslateLanguage,
 } from "../lib/api";
 import { getPreferredTranslateTarget, setPreferredTranslateTarget } from "../lib/translatePreference";
+import { getSensitiveMediaDisplay } from "../lib/mediaPrefs";
 
 // A small, fixed picker set — not exhaustive, just the common ones.
 // Custom emoji (fetched lazily when the picker opens) round it out.
@@ -55,6 +56,28 @@ import { timeAgoLong } from "../lib/timeAgo";
 function assetUrl(path: string) {
   return /^https?:\/\//.test(path) ? path : `${API_URL}${path}`;
 }
+
+// The click-to-reveal overlay over blurred sensitive media — a dark
+// scrim rather than .btn-ghost's transparent background, since a
+// transparent button over an arbitrary photo can end up unreadable
+// against whatever colors are underneath it.
+const SENSITIVE_OVERLAY_STYLE: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  width: "100%",
+  height: "100%",
+  border: "none",
+  borderRadius: "var(--radius-sm)",
+  background: "rgba(0, 0, 0, 0.45)",
+  color: "#fff",
+  fontWeight: 600,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  textAlign: "center",
+  padding: "0.5rem",
+};
 
 // Detail = true on the post detail page (title isn't a link to itself,
 // comments are always expanded rather than toggled). boxStyle overrides
@@ -122,12 +145,18 @@ export function PostItem({
     audioUrl: post.audioUrl,
     updatedAt: post.updatedAt,
     contentWarning: post.contentWarning,
+    sensitive: post.sensitive,
   });
   // Body/media stay hidden behind the CW until clicked — starts closed
   // whenever a CW is set, on every render of this post (not "sticky open"
   // once revealed within a session), matching how every fediverse client
   // treats content warnings.
   const [cwRevealed, setCwRevealed] = useState(false);
+  // Starts blurred (the safe default) and only relaxes after mount, once
+  // the viewer's actual preference (lib/mediaPrefs.ts) has been read —
+  // never the other way around, so there's no window where sensitive
+  // media briefly renders unblurred before the preference loads.
+  const [showSensitiveByDefault, setShowSensitiveByDefault] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editUrl, setEditUrl] = useState("");
@@ -135,6 +164,7 @@ export function PostItem({
   const [editLocation, setEditLocation] = useState("");
   const [editContentWarning, setEditContentWarning] = useState("");
   const [editShowContentWarning, setEditShowContentWarning] = useState(false);
+  const [editSensitive, setEditSensitive] = useState(false);
   const [editMediaFile, setEditMediaFile] = useState<File | null>(null);
   const [editRemoveMedia, setEditRemoveMedia] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -151,6 +181,7 @@ export function PostItem({
     getCustomEmoji()
       .then(setCustomEmoji)
       .catch(() => setCustomEmoji([]));
+    setShowSensitiveByDefault(getSensitiveMediaDisplay() === "show");
   }, []);
 
   async function handleAdminDelete() {
@@ -182,6 +213,7 @@ export function PostItem({
     setEditLocation(content.location ?? "");
     setEditContentWarning(content.contentWarning ?? "");
     setEditShowContentWarning(Boolean(content.contentWarning));
+    setEditSensitive(content.sensitive);
     setEditMediaFile(null);
     setEditRemoveMedia(false);
     setEditError(null);
@@ -214,6 +246,7 @@ export function PostItem({
         url: editUrl || null,
         body: editBody || null,
         contentWarning: editShowContentWarning && editContentWarning ? editContentWarning : null,
+        sensitive: editSensitive,
         location: editLocation || null,
         ...(imageUrl !== undefined ? { imageUrl } : {}),
         ...(videoUrl !== undefined ? { videoUrl } : {}),
@@ -228,6 +261,7 @@ export function PostItem({
         audioUrl: updated.audioUrl,
         updatedAt: updated.updatedAt,
         contentWarning: updated.contentWarning,
+        sensitive: updated.sensitive,
       });
       setCwRevealed(false);
       setEditing(false);
@@ -458,6 +492,11 @@ export function PostItem({
 
   if (deleted) return null;
 
+  // Once cwRevealed is true (a click on either this or the CW banner
+  // above sets it), sensitive media un-blurs the same way a CW reveals
+  // everything else — one click, not two separate reveal states.
+  const mediaBlurred = content.sensitive && !cwRevealed && !showSensitiveByDefault;
+
   return (
     <li
       className="card"
@@ -596,6 +635,16 @@ export function PostItem({
                 }}
               />
             </label>
+            {((content.imageUrl || content.videoUrl) && !editRemoveMedia) || editMediaFile ? (
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", margin: "0.5rem 0" }}>
+                <input
+                  type="checkbox"
+                  checked={editSensitive}
+                  onChange={(e) => setEditSensitive(e.target.checked)}
+                />
+                🔞 Sensitive media (blurred until clicked)
+              </label>
+            ) : null}
             <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.4rem" }}>
               <button type="submit" disabled={editSubmitting} className="btn btn-accent">
                 {editSubmitting ? "Saving…" : "Save"}
@@ -693,19 +742,43 @@ export function PostItem({
             )}
 
             {content.imageUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={assetUrl(content.imageUrl)}
-                alt=""
-                style={{ maxWidth: "100%", borderRadius: "var(--radius-sm)", display: "block", margin: "0.5rem 0" }}
-              />
+              <div style={{ position: "relative", margin: "0.5rem 0" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={assetUrl(content.imageUrl)}
+                  alt=""
+                  style={{
+                    maxWidth: "100%",
+                    borderRadius: "var(--radius-sm)",
+                    display: "block",
+                    filter: mediaBlurred ? "blur(24px)" : undefined,
+                  }}
+                />
+                {mediaBlurred && (
+                  <button type="button" onClick={() => setCwRevealed(true)} style={SENSITIVE_OVERLAY_STYLE}>
+                    🔞 Sensitive content — click to view
+                  </button>
+                )}
+              </div>
             )}
             {content.videoUrl && (
-              <video
-                src={assetUrl(content.videoUrl)}
-                controls
-                style={{ maxWidth: "100%", borderRadius: "var(--radius-sm)", display: "block", margin: "0.5rem 0" }}
-              />
+              <div style={{ position: "relative", margin: "0.5rem 0" }}>
+                <video
+                  src={assetUrl(content.videoUrl)}
+                  controls={!mediaBlurred}
+                  style={{
+                    maxWidth: "100%",
+                    borderRadius: "var(--radius-sm)",
+                    display: "block",
+                    filter: mediaBlurred ? "blur(24px)" : undefined,
+                  }}
+                />
+                {mediaBlurred && (
+                  <button type="button" onClick={() => setCwRevealed(true)} style={SENSITIVE_OVERLAY_STYLE}>
+                    🔞 Sensitive content — click to view
+                  </button>
+                )}
+              </div>
             )}
             {content.audioUrl && (
               <audio

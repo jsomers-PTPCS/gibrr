@@ -2,8 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
-import { getMe, getSetupStatus, type Me } from "../lib/api";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  getMe,
+  getSetupStatus,
+  getSessions,
+  switchAccount,
+  type Me,
+  type SessionAccount,
+} from "../lib/api";
 import { Avatar } from "./Avatar";
 import { Logo } from "./Logo";
 import { LoopsIcon, FederatedIcon } from "./icons";
@@ -13,10 +20,22 @@ export function Nav() {
   const [me, setMe] = useState<Me | null | "loading">("loading");
   const [query, setQuery] = useState("");
 
-  useEffect(() => {
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [sessions, setSessions] = useState<SessionAccount[]>([]);
+  const [switching, setSwitching] = useState<string | null>(null);
+  const switcherRef = useRef<HTMLDivElement>(null);
+
+  function refresh() {
     getMe()
       .then(setMe)
       .catch(() => setMe(null));
+    getSessions()
+      .then(setSessions)
+      .catch(() => setSessions([]));
+  }
+
+  useEffect(() => {
+    refresh();
 
     // First-run check: a brand new instance has no accounts at all,
     // which means no one could be logged in either — send any visitor
@@ -31,6 +50,28 @@ export function Nav() {
         .catch(() => {});
     }
   }, [router]);
+
+  useEffect(() => {
+    if (!switcherOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (switcherRef.current && !switcherRef.current.contains(e.target as Node)) {
+        setSwitcherOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [switcherOpen]);
+
+  async function handleSwitch(actorId: string) {
+    setSwitching(actorId);
+    try {
+      await switchAccount(actorId);
+      refresh();
+      setSwitcherOpen(false);
+    } finally {
+      setSwitching(null);
+    }
+  }
 
   function handleSearch(e: FormEvent) {
     e.preventDefault();
@@ -101,22 +142,96 @@ export function Nav() {
           there's no hamburger panel for them to live in. */}
       <div className="nav-account">
       {me === "loading" ? null : me ? (
-        // Straight to the profile page — Settings and Log out live
-        // there now, so there's no need for a separate switcher menu
-        // just to reach them.
-        <Link
-          href={`/u/${me.actor.username}`}
-          className="btn btn-ghost nav-account-profile-link"
-          style={{ alignItems: "center", gap: "0.5rem" }}
-        >
-          <Avatar
-            name={me.actor.displayName ?? me.actor.username}
-            size={28}
-            imageUrl={me.actor.avatarImageUrl}
-            preset={me.actor.avatarPreset}
-          />
-          {me.actor.username}
-        </Link>
+        <>
+          {/* Straight to the profile page — Settings and Log out live
+              there now, so there's no need to go through a menu just to
+              reach them. The switcher below is only for jumping between
+              accounts already signed in on this browser. */}
+          <Link
+            href={`/u/${me.actor.username}`}
+            className="btn btn-ghost nav-account-profile-link"
+            style={{ alignItems: "center", gap: "0.5rem" }}
+          >
+            <Avatar
+              name={me.actor.displayName ?? me.actor.username}
+              size={28}
+              imageUrl={me.actor.avatarImageUrl}
+              preset={me.actor.avatarPreset}
+            />
+            {me.actor.username}
+          </Link>
+
+          <div ref={switcherRef} style={{ position: "relative" }} className="nav-account-switcher">
+            <button
+              className="btn btn-ghost"
+              onClick={() => setSwitcherOpen((open) => !open)}
+              aria-label="Switch account"
+              title="Switch account"
+              style={{ padding: "0.4rem 0.5rem" }}
+            >
+              ▾
+            </button>
+
+            {switcherOpen && (
+              <div
+                className="card"
+                style={{
+                  position: "absolute",
+                  right: 0,
+                  top: "calc(100% + 0.5rem)",
+                  minWidth: 240,
+                  zIndex: 20,
+                  padding: "0.5rem",
+                }}
+              >
+                {sessions.filter((s) => !s.current).length > 0 && (
+                  <>
+                    {sessions
+                      .filter((s) => !s.current)
+                      .map((s) => (
+                        <button
+                          key={s.actor.id}
+                          onClick={() => handleSwitch(s.actor.id)}
+                          disabled={switching === s.actor.id}
+                          style={{
+                            width: "100%",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.5rem",
+                            background: "none",
+                            border: "none",
+                            color: "inherit",
+                            cursor: "pointer",
+                            padding: "0.4rem 0.5rem",
+                            textAlign: "left",
+                            font: "inherit",
+                          }}
+                        >
+                          <Avatar
+                            name={s.actor.displayName ?? s.actor.username}
+                            size={22}
+                            imageUrl={s.actor.avatarImageUrl}
+                            preset={s.actor.avatarPreset}
+                          />
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {switching === s.actor.id ? "Switching…" : s.actor.username}
+                          </span>
+                        </button>
+                      ))}
+                    <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "0.4rem 0" }} />
+                  </>
+                )}
+                <Link
+                  href="/login"
+                  onClick={() => setSwitcherOpen(false)}
+                  style={{ display: "block", padding: "0.4rem 0.5rem", color: "inherit" }}
+                >
+                  + Add another account
+                </Link>
+              </div>
+            )}
+          </div>
+        </>
       ) : (
         <>
           <Link href="/login">Log in</Link>

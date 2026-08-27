@@ -16,30 +16,12 @@ import { getOrCreateInstanceActor, actorIri, localDomain } from "../federation/l
 import { originFor } from "../federation/urls.js";
 import { fetchRemoteActor, upsertRemoteActor } from "../federation/remoteActor.js";
 import { searchRelayDirectory } from "../federation/relayDirectory.js";
-import { normalizeDomain } from "../federation/domainBlocks.js";
+import { normalizeDomain, domainShapeSchema } from "../federation/domainBlocks.js";
 import { fetchExploreTimelineForDomain } from "../federation/exploreDispatch.js";
 import { fetchInstanceSoftware } from "../federation/instanceSoftware.js";
 import { registerOAuthApp, buildAuthorizeUrl, exchangeCodeForToken } from "../federation/mastodonOAuth.js";
 import { getFediDbSyncStatus, setFediDbSyncSettings, runFediDbSync } from "../federation/fedidb.js";
 import { webOrigin } from "./auth.js";
-
-// A real hostname shape (labels of letters/digits/hyphens joined by
-// dots, at least one dot so a bare typo'd single word gets rejected
-// up front) with an optional :port for local dev domains like
-// "localhost:4000". This can only catch gross typos — missing dots,
-// spaces, invalid characters — not a legitimate-looking misspelling of
-// a real domain ("mastadon.social" is a perfectly valid hostname
-// shape, just the wrong one); that class of error needs a live
-// reachability check instead, which only makes sense where the
-// endpoint requires the target to actually respond (Explore servers,
-// relays) — not for domain blocks, where the whole point can be
-// blocking something already gone or hostile enough not to answer.
-const DOMAIN_SHAPE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(:[0-9]+)?$/;
-const domainShapeSchema = z
-  .string()
-  .min(1)
-  .max(253)
-  .regex(DOMAIN_SHAPE, "doesn't look like a real domain (check for typos)");
 
 export const adminRouter = Router();
 

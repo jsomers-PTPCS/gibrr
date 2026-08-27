@@ -63,11 +63,43 @@ async function serializeStarterPack(pack: {
 }
 
 // GET /starter-packs -> every starter kit on this instance, newest
-// first — a public discovery listing, not scoped to the viewer's own,
-// same "anyone signed in can browse" posture as GET /explore/loops/feed.
+// first by default — a public discovery listing, not scoped to the
+// viewer's own, same "anyone signed in can browse" posture as GET
+// /explore/loops/feed. ?mine=true narrows that to the viewer's own kits
+// instead — the one filter dimension this model actually supports,
+// since there's no tags/category field (see schema.prisma's
+// StarterPack). ?q searches name/description, same contains+insensitive
+// convention as routes/search.ts. "members" isn't a stored column (the
+// count only exists after resolving memberActorIds), so ?sort=members
+// sorts the already-serialized array in memory instead of pushing that
+// into the Prisma query.
 starterPacksRouter.get("/starter-packs", requireAuth, async (req, res) => {
-  const packs = await prisma.starterPack.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
-  res.json(await Promise.all(packs.map((p) => serializeStarterPack(p, req.actor!.id))));
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const mineOnly = req.query.mine === "true";
+  const sort = typeof req.query.sort === "string" ? req.query.sort : "newest";
+
+  const packs = await prisma.starterPack.findMany({
+    where: {
+      ...(mineOnly ? { actorId: req.actor!.id } : {}),
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: "insensitive" as const } },
+              { description: { contains: q, mode: "insensitive" as const } },
+            ],
+          }
+        : {}),
+    },
+    orderBy:
+      sort === "oldest" ? { createdAt: "asc" } : sort === "name" ? { name: "asc" } : { createdAt: "desc" },
+    take: 100,
+  });
+
+  let serialized = await Promise.all(packs.map((p) => serializeStarterPack(p, req.actor!.id)));
+  if (sort === "members") {
+    serialized = serialized.sort((a, b) => b.members.length - a.members.length);
+  }
+  res.json(serialized);
 });
 
 starterPacksRouter.get("/starter-packs/:id", requireAuth, async (req, res) => {

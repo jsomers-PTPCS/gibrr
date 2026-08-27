@@ -241,3 +241,15 @@ export function CirclesIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+// BookwyrmTab.tsx's star rating — rendered twice per star (outline,
+// then a width-clipped filled copy) to draw BookWyrm's half-star
+// increments precisely, rather than swapping in a separate half-star
+// glyph.
+export function StarIcon({ filled = false, ...props }: SVGProps<SVGSVGElement> & { filled?: boolean }) {
+  return (
+    <Icon {...props} fill={filled ? "currentColor" : "none"}>
+      <polygon points="12 2.5 15.1 8.8 22 9.8 17 14.6 18.2 21.5 12 18.2 5.8 21.5 7 14.6 2 9.8 8.9 8.8 12 2.5" />
+    </Icon>
+  );
+}

@@ -19,6 +19,7 @@ import { Avatar } from "../../components/Avatar";
 import { HeartIcon, CommentIcon, BoostIcon, BookmarkIcon, MuteIcon, PlayIcon } from "../../components/icons";
 import { ShareMenu } from "../../components/ShareMenu";
 import { PostComments } from "../../components/PostComments";
+import { timeAgoLong } from "../../lib/timeAgo";
 
 const LOOPS_SORT_OPTIONS: { value: LoopsSort; label: string }[] = [
   { value: "new", label: "New" },
@@ -112,11 +113,63 @@ function LoopSlide({
   // itself expecting pause-toggle instead).
   const [commentsOpen, setCommentsOpen] = useState(false);
 
+  // The scrub bar at the very bottom edge — currentTime/duration mirror
+  // the real <video> element (kept in sync via onTimeUpdate/
+  // onLoadedMetadata below) so the filled portion always reflects actual
+  // playback, not just what a drag last set. scrubbingRef (not state)
+  // since it's read inside the pointermove handler on every pixel of
+  // movement — a state read there would be stale until the next render.
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const progressBarRef = useRef<HTMLDivElement>(null);
+  const scrubbingRef = useRef(false);
+  const wasPausedBeforeScrubRef = useRef(false);
+
+  function seekFromClientX(clientX: number) {
+    const bar = progressBarRef.current;
+    const video = videoRef.current;
+    if (!bar || !video || !Number.isFinite(duration) || duration <= 0) return;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const time = ratio * duration;
+    video.currentTime = time;
+    setCurrentTime(time);
+  }
+
+  // stopPropagation on all three — this bar sits inside the same
+  // relatively-positioned slide as the video's own click-to-pause/swipe-
+  // to-mute handlers; without it, a tap-to-seek here would also fire the
+  // video's onClick right after (toggling play/pause) since pointerup
+  // on this element still bubbles to become a click on an ancestor.
+  function handleScrubStart(e: React.PointerEvent<HTMLDivElement>) {
+    e.stopPropagation();
+    scrubbingRef.current = true;
+    wasPausedBeforeScrubRef.current = paused;
+    setPaused(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    seekFromClientX(e.clientX);
+  }
+  function handleScrubMove(e: React.PointerEvent<HTMLDivElement>) {
+    e.stopPropagation();
+    if (!scrubbingRef.current) return;
+    seekFromClientX(e.clientX);
+  }
+  function handleScrubEnd(e: React.PointerEvent<HTMLDivElement>) {
+    e.stopPropagation();
+    if (!scrubbingRef.current) return;
+    scrubbingRef.current = false;
+    setPaused(wasPausedBeforeScrubRef.current);
+  }
+
+  const progressPct =
+    Number.isFinite(duration) && duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     if (active) {
       video.currentTime = 0;
+      setCurrentTime(0);
       setPaused(false);
       video.play().catch(() => {});
     } else {
@@ -191,6 +244,12 @@ function LoopSlide({
         onPointerMove={handleVideoPointerMove}
         onPointerUp={endVideoSwipe}
         onPointerCancel={endVideoSwipe}
+        // Drives the scrub bar below — not read while actively dragging
+        // it (seekFromClientX already updates `currentTime` state
+        // directly on every pointermove), but this is what keeps the
+        // bar moving during ordinary, un-scrubbed playback.
+        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
         // Lets the browser keep handling vertical swipes (scrolling
         // between slides) natively while horizontal drags are left for
         // the pointer handlers above to interpret as the mute gesture.
@@ -275,6 +334,40 @@ function LoopSlide({
         {/* Hidden until a double-click/double-tap on the video reveals
             it — see the video element's onDoubleClick above. */}
         {post.body && showDescription && <p style={{ margin: "0.5rem 0 0" }}>{post.body}</p>}
+        <p style={{ margin: "0.35rem 0 0", opacity: 0.75, fontSize: "0.8rem" }}>
+          Posted {timeAgoLong(post.createdAt)}
+        </p>
+      </div>
+
+      {/* The scrub bar — a separate element layered on top of (not
+          inside) the caption gradient above, so its own pointer handlers
+          don't have to fight that container's pointerEvents: "none".
+          Full-width, sitting right at the very bottom edge; the visible
+          line is thin (3px) but the draggable hit area is taller so it's
+          actually easy to grab on a phone. stopPropagation in each
+          handler keeps a drag/tap here from also reaching the video's
+          own click-to-pause/swipe-to-mute handlers underneath. */}
+      <div
+        ref={progressBarRef}
+        onPointerDown={handleScrubStart}
+        onPointerMove={handleScrubMove}
+        onPointerUp={handleScrubEnd}
+        onPointerCancel={handleScrubEnd}
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: "1.25rem",
+          display: "flex",
+          alignItems: "flex-end",
+          cursor: "pointer",
+          touchAction: "none",
+        }}
+      >
+        <div style={{ width: "100%", height: 3, background: "rgba(255,255,255,0.3)" }}>
+          <div style={{ width: `${progressPct}%`, height: "100%", background: "#fff" }} />
+        </div>
       </div>
 
       <div
