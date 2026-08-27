@@ -579,6 +579,10 @@ export default function LoopsPage() {
   const [loopsSort, setLoopsSort] = useState<LoopsSort>("rising");
   const [selectedLoopsDomains, setSelectedLoopsDomains] = useState<string[]>([]);
   const [availableLoopsDomains, setAvailableLoopsDomains] = useState<string[]>([]);
+  // Drop the Host-curated server half of the feed and show only videos
+  // from accounts this viewer follows — GET /explore/loops/feed's
+  // ?following=1. The servers filter below still narrows on top of it.
+  const [followingOnly, setFollowingOnly] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
 
   useEffect(() => {
@@ -589,7 +593,7 @@ export default function LoopsPage() {
 
   useEffect(() => {
     setPosts("loading");
-    getLoopsFeed({ sort: loopsSort, domains: selectedLoopsDomains })
+    getLoopsFeed({ sort: loopsSort, domains: selectedLoopsDomains, followingOnly })
       .then((res) => {
         setPosts(res.posts);
         if (res.posts.length > 0) setActiveId(res.posts[0].id);
@@ -601,7 +605,7 @@ export default function LoopsPage() {
         }
         setPosts("error");
       });
-  }, [loopsSort, selectedLoopsDomains]);
+  }, [loopsSort, selectedLoopsDomains, followingOnly]);
 
   useEffect(() => {
     if (!Array.isArray(posts) || posts.length === 0) return;
@@ -767,6 +771,24 @@ export default function LoopsPage() {
             ))}
           </select>
 
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+              marginBottom: "1.25rem",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={followingOnly}
+              onChange={(e) => setFollowingOnly(e.target.checked)}
+            />
+            Only accounts I follow
+          </label>
+
           <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.4rem" }}>
             Servers
           </label>
@@ -828,8 +850,9 @@ export default function LoopsPage() {
       <main className="page">
         <h1>Loops</h1>
         <p className="text-dim">
-          No Loops content yet — try widening the servers filter, or ask your Host to add a Loops
-          server under Host &gt; Explore servers.
+          {followingOnly
+            ? "None of the accounts you follow have posted a Loop yet — turn off “Only accounts I follow” to see the rest of the fediverse."
+            : "No Loops content yet — try widening the servers filter, or ask your Host to add a Loops server under Host > Explore servers."}
         </p>
         {filterDrawer}
       </main>

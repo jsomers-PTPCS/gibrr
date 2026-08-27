@@ -1681,10 +1681,11 @@ export function getExploreTimeline(domain: string) {
 // getExploreTimeline.
 export type LoopsSort = "new" | "rising" | "likes" | "comments";
 
-export function getLoopsFeed(filters?: { sort?: LoopsSort; domains?: string[] }) {
+export function getLoopsFeed(filters?: { sort?: LoopsSort; domains?: string[]; followingOnly?: boolean }) {
   const params = new URLSearchParams();
   if (filters?.sort && filters.sort !== "new") params.set("sort", filters.sort);
   if (filters?.domains && filters.domains.length > 0) params.set("domain", filters.domains.join(","));
+  if (filters?.followingOnly) params.set("following", "1");
   const query = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<{ posts: Post[] }>(`/explore/loops/feed${query}`);
 }

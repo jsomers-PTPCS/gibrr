@@ -87,10 +87,54 @@ exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
       ? req.query.domain.split(",").map((d) => d.trim()).filter(Boolean)
       : [];
 
+  // ?following=1 -> drop the curated-server half below and serve only
+  // videos from accounts this viewer actually follows. The Loops page's
+  // filter drawer exposes it as an "Only accounts I follow" toggle, for
+  // someone who's built up their own follows and doesn't want the
+  // Host's hand-picked server list mixed in.
+  const followingOnly = req.query.following === "1" || req.query.following === "true";
+
+  // Every account the viewer follows who's posted a video — a followed
+  // Loops account's own videos belong in the feed regardless of whether
+  // their server has ever been curated into Explore (most won't be:
+  // Explore only tracks a small hand-picked list, but a follow is a much
+  // stronger, individually-chosen signal than that list). Not gated on
+  // remoteId/domain at all, so a followed *local* video counts too.
+  const followingIds = (
+    await prisma.follow.findMany({
+      where: { followerId: req.actor!.id, state: "accepted" },
+      select: { followingId: true },
+    })
+  ).map((f) => f.followingId);
+
+  const followedVideoPostIds =
+    followingIds.length > 0
+      ? (
+          await prisma.post.findMany({
+            where: {
+              authorActorId: { in: followingIds },
+              videoUrl: { not: null },
+              ...(domainFilter.length > 0 ? { author: { domain: { in: domainFilter } } } : {}),
+            },
+            select: { id: true },
+            take: 60,
+          })
+        ).map((p) => p.id)
+      : [];
+
+  // The curated half — every Host-curated Loops server's cached
+  // timeline. Skipped for ?following=1; otherwise it's the bulk of the
+  // feed. Each row also carries the origin server's own like/comment
+  // totals as of the last sweep, reused for the "Most liked"/"Most
+  // commented"/"rising" sorts and the baseline counts on each slide, so
+  // in follows-only mode we still look those up — just narrowed to the
+  // followed videos that happen to sit on a curated server too.
   const cached = await prisma.exploreCachedPost.findMany({
-    where: {
-      server: { software: "Loops", ...(domainFilter.length > 0 ? { domain: { in: domainFilter } } : {}) },
-    },
+    where: followingOnly
+      ? { postId: { in: followedVideoPostIds }, server: { software: "Loops" } }
+      : {
+          server: { software: "Loops", ...(domainFilter.length > 0 ? { domain: { in: domainFilter } } : {}) },
+        },
     select: { postId: true, remoteLikes: true, remoteComments: true },
   });
 
@@ -102,32 +146,8 @@ exploreRouter.get("/explore/loops/feed", requireAuth, async (req, res) => {
     remoteCountsByPostId.set(entry.postId, { likes: entry.remoteLikes, comments: entry.remoteComments });
   }
 
-  // Every account the viewer follows who's posted a video — a followed
-  // Loops account's own videos belong here regardless of whether their
-  // server has ever been curated into Explore (most won't be: Explore
-  // only tracks a small hand-picked list, but a follow is a much
-  // stronger, individually-chosen signal than that list). Not gated on
-  // remoteId/domain at all, so a followed *local* video counts too.
-  const followingIds = (
-    await prisma.follow.findMany({
-      where: { followerId: req.actor!.id, state: "accepted" },
-      select: { followingId: true },
-    })
-  ).map((f) => f.followingId);
-
-  const postIds = new Set(remoteCountsByPostId.keys());
-  if (followingIds.length > 0) {
-    const followedVideoPosts = await prisma.post.findMany({
-      where: {
-        authorActorId: { in: followingIds },
-        videoUrl: { not: null },
-        ...(domainFilter.length > 0 ? { author: { domain: { in: domainFilter } } } : {}),
-      },
-      select: { id: true },
-      take: 60,
-    });
-    for (const p of followedVideoPosts) postIds.add(p.id);
-  }
+  const postIds = new Set(followingOnly ? [] : remoteCountsByPostId.keys());
+  for (const id of followedVideoPostIds) postIds.add(id);
   if (postIds.size === 0) return res.json({ posts: [] });
 
   const posts = await prisma.post.findMany({
