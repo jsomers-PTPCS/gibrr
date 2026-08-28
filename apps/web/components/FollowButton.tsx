@@ -104,9 +104,6 @@ export function FollowButton({
 
   return (
     <span style={{ display: "inline-flex", gap: "0.35rem", alignItems: "center" }}>
-      <button className="btn btn-ghost" disabled={busy} onClick={stop}>
-        Listening
-      </button>
       <button
         type="button"
         className="btn btn-ghost post-icon-btn"
@@ -118,6 +115,9 @@ export function FollowButton({
         style={{ width: "2rem", height: "2rem", color: notify ? "var(--primary-bright)" : undefined }}
       >
         <BellIcon width={16} height={16} filled={notify} />
+      </button>
+      <button className="btn btn-ghost" disabled={busy} onClick={stop}>
+        Listening
       </button>
     </span>
   );
