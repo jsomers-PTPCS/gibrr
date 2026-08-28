@@ -48,6 +48,22 @@ function stripLeadingName(content: string): string {
   return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }
 
+// BookWyrm auto-generates every review/rating's `name` as
+// `Review of "<book>" (<n> stars): <title>`, and fills <title> with the
+// literal string "None" when the item has no title of its own — which a
+// bare star rating never does (confirmed live: a `/reviewrating/` item
+// comes through as `... (5 stars): None`). Rendering that verbatim put a
+// stray "None" heading on the tab. A real text review keeps its actual
+// title after the colon, so only the ": None" form is dropped; once the
+// synthetic prefix is all that's left there's no title worth showing
+// next to the cover and star rating that already render.
+function cleanReviewName(name: unknown): string | null {
+  if (typeof name !== "string") return null;
+  const withoutNoneSuffix = name.replace(/:\s*None\s*$/i, "").trim();
+  if (withoutNoneSuffix === name.trim()) return name;
+  return null;
+}
+
 async function fetchJson(url: string): Promise<Record<string, unknown> | null> {
   try {
     const response = await fetch(url, { headers: { Accept: "application/activity+json" } });
@@ -113,7 +129,7 @@ export async function fetchBookwyrmActivity(
       // whatever edition/cover the account has picked there.
       bookCoverUrl: cover.url,
       publishedAt: typeof item.published === "string" ? item.published : new Date().toISOString(),
-      reviewName: typeof item.name === "string" ? item.name : null,
+      reviewName: cleanReviewName(item.name),
       rating: typeof item.rating === "number" ? item.rating : null,
       isCurrentlyReading: /\bstarted reading\b/i.test(item.content),
     });
