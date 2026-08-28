@@ -990,6 +990,24 @@ export function search(q: string) {
   return apiFetch<SearchResults>(`/search?q=${encodeURIComponent(q)}`);
 }
 
+// A live keyword sweep across the Host-curated Explore servers (Mastodon
+// tag timelines + Misskey full-text) — the closest thing to "search the
+// fediverse" without a global crawl. Separate call from search() so
+// local results aren't held up by the remote fan-out. Each result is a
+// lightweight preview; opening one resolves it via resolvePostByUrl.
+export interface FediverseSearchResult {
+  url: string;
+  domain: string;
+  software: string;
+  author: { username: string; displayName: string | null; avatarUrl: string | null };
+  contentText: string;
+  createdAt: string;
+}
+
+export function searchFediverse(q: string) {
+  return apiFetch<{ results: FediverseSearchResult[] }>(`/search/fediverse?q=${encodeURIComponent(q)}`);
+}
+
 // Remote-group discovery/joining — the group-level counterpart to
 // getFollowPreview/followHandle. lookupRemoteGroup is read-only (mirrors
 // GET /follows/preview); joinRemoteGroup actually creates a pending

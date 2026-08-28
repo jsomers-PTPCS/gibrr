@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   search,
+  searchFediverse,
   lookupRemoteGroup,
   joinRemoteGroup,
   getFollowPreview,
@@ -20,12 +21,14 @@ import {
   type RemoteGroupPreview,
   type FollowPreview,
   type Community,
+  type FediverseSearchResult,
 } from "../../lib/api";
 import { PostItem } from "../../components/PostItem";
 import { Avatar } from "../../components/Avatar";
 import { RenderedDescription } from "../../components/RenderedDescription";
 import { PageInfo } from "../../components/PageInfo";
 import { ABOUT_FIELD_LABELS } from "../../lib/aboutFields";
+import { timeAgo } from "../../lib/timeAgo";
 import { dedupeDirectoriesByUrl, type FediverseDirectoryLink } from "../../lib/fediverseDirectories";
 
 // There's no crawled index of the fediverse to fuzzy-search against (no
@@ -49,6 +52,10 @@ function SearchResultsInner() {
   const [myGroups, setMyGroups] = useState<Community[]>([]);
   const [postLookupState, setPostLookupState] = useState<"idle" | "loading" | "error">("idle");
   const [directoryLinks, setDirectoryLinks] = useState<FediverseDirectoryLink[]>([]);
+  const [fedResults, setFedResults] = useState<FediverseSearchResult[] | "loading" | "error" | "skipped">(
+    "loading",
+  );
+  const [openingUrl, setOpeningUrl] = useState<string | null>(null);
 
   useEffect(() => {
     getMe()
@@ -78,6 +85,19 @@ function SearchResultsInner() {
     search(q)
       .then(setResults)
       .catch(() => setResults("error"));
+
+    // Fired in parallel — a keyword sweep across the curated Explore
+    // servers. Skipped for an exact handle or a pasted URL (those have
+    // their own resolution above). Its own loading state, since the
+    // remote fan-out can lag well behind the local results.
+    if (HANDLE_PATTERN.test(handleQuery) || URL_PATTERN.test(q.trim())) {
+      setFedResults("skipped");
+    } else {
+      setFedResults("loading");
+      searchFediverse(q)
+        .then((r) => setFedResults(r.results))
+        .catch(() => setFedResults("error"));
+    }
 
     setJoinState("idle");
     setFollowState("idle");
@@ -126,6 +146,25 @@ function SearchResultsInner() {
         return;
       }
       setPostLookupState("error");
+    }
+  }
+
+  // Fediverse search results are previews only — resolve the real post on
+  // click (idempotent; the same URL always lands on the same local id),
+  // then open it in-app.
+  async function openFediversePost(url: string) {
+    setOpeningUrl(url);
+    try {
+      const { id } = await resolvePostByUrl(url);
+      router.push(`/posts/${id}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      // Fall back to the original — better than a dead click.
+      window.open(url, "_blank", "noopener");
+      setOpeningUrl(null);
     }
   }
 
@@ -389,6 +428,65 @@ function SearchResultsInner() {
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               {results.posts.map((post) => (
                 <PostItem key={post.id} post={post} />
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
+      {fedResults !== "skipped" && (
+        <>
+          <h2 style={{ fontSize: "1.1rem", marginTop: "1.5rem" }}>From the fediverse</h2>
+          {fedResults === "loading" && <p className="text-dim">Searching other servers…</p>}
+          {fedResults === "error" && (
+            <p className="text-faint">Couldn&apos;t reach the other servers right now.</p>
+          )}
+          {Array.isArray(fedResults) && fedResults.length === 0 && (
+            <p className="text-faint">
+              Nothing on the servers this room follows. This searches their public tag timelines and
+              full-text where a server allows it — not the whole fediverse (no server can crawl that).
+            </p>
+          )}
+          {Array.isArray(fedResults) && fedResults.length > 0 && (
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {fedResults.map((r) => (
+                <li
+                  key={r.url}
+                  className="card"
+                  style={{ marginBottom: "0.5rem", opacity: openingUrl === r.url ? 0.5 : 1 }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => openFediversePost(r.url)}
+                    disabled={openingUrl !== null}
+                    style={{
+                      display: "flex",
+                      gap: "0.6rem",
+                      alignItems: "flex-start",
+                      width: "100%",
+                      background: "none",
+                      border: "none",
+                      color: "inherit",
+                      cursor: "pointer",
+                      padding: 0,
+                      textAlign: "left",
+                      font: "inherit",
+                    }}
+                  >
+                    <Avatar name={r.author.displayName ?? r.author.username} size={34} imageUrl={r.author.avatarUrl} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: "0.9rem" }}>
+                        <strong>{r.author.displayName ?? r.author.username}</strong>{" "}
+                        <span className="text-faint">
+                          @{r.author.username} · {r.domain} · {timeAgo(r.createdAt)}
+                        </span>
+                      </div>
+                      <p style={{ margin: "0.2rem 0 0", fontSize: "0.9rem", whiteSpace: "pre-wrap" }}>
+                        {r.contentText.length > 280 ? `${r.contentText.slice(0, 280)}…` : r.contentText}
+                      </p>
+                    </div>
+                  </button>
+                </li>
               ))}
             </ul>
           )}

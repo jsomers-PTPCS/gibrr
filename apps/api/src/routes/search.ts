@@ -6,6 +6,7 @@ import { postInclude, withCommentCount, postVisibilityWhere, blockedActorIds } f
 import { attachPostVotes, attachCalendarSaves, attachReactions, attachPolls, attachBookmarked } from "../votes.js";
 import { toPublicActor } from "../federation/localActor.js";
 import type { AboutFieldKey } from "../federation/aboutFields.js";
+import { searchFediverse } from "../federation/fediverseSearch.js";
 
 export const searchRouter = Router();
 
@@ -52,6 +53,24 @@ function publicAboutMatches(actor: Actor, q: string): AboutMatch[] {
 
   return matches;
 }
+
+// A pasted URL is a resolve-this-exact-thing case (the search page has
+// its own "Look up this Gib" / profile-preview flow for it), not a
+// keyword search — skip the fediverse fan-out for it.
+const URL_QUERY = /^https?:\/\//i;
+
+// GET /search/fediverse?q=... -> a live keyword sweep across the
+// Host-curated Explore servers (Mastodon tag timelines + Misskey
+// full-text). Separate from GET /search below so local results render
+// instantly and these stream in after — the fan-out can take a few
+// seconds against slow remote servers. Public, same as the main search.
+// Registered before GET /search so "/fediverse" isn't ambiguous (it
+// isn't — different path — but keeps the two next to each other).
+searchRouter.get("/search/fediverse", async (req, res) => {
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (!q || URL_QUERY.test(q)) return res.json({ results: [] });
+  res.json({ results: await searchFediverse(q) });
+});
 
 // GET /search?q=... -> posts (by title), local people (by username, or by
 // a public About field), and local groups (by title/description/actor
