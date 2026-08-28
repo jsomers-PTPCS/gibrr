@@ -31,6 +31,7 @@ import { deliverToFollowers, deliverActivity } from "../federation/deliver.js";
 import { deletePosts } from "../deletion.js";
 import { extractHashtagTokens, extractMentionTokens } from "../federation/textEntities.js";
 import { resolveMentions } from "../federation/mentions.js";
+import { notify } from "../federation/notifications.js";
 import { resolveAndCacheRemotePost } from "../federation/remotePost.js";
 import { fetchLiveCounts } from "../federation/remoteEngagement.js";
 
@@ -398,6 +399,16 @@ postsRouter.post("/posts", requireAuth, async (req, res) => {
   }
   // "local_only" is never delivered anywhere, by design — see
   // createNoteFromPost's addressing comment.
+
+  // In-app @mention notifications for local mentioned actors. A
+  // "specified" note only reaches its named recipients, so only they get
+  // notified there; a public/followers note notifies everyone mentioned
+  // in the body. notify() drops the author's own mention of themselves
+  // and anyone who blocked them.
+  const mentionRecipients = visibility === "specified" ? recipientActors : mentionedActors;
+  for (const mentioned of mentionRecipients) {
+    void notify({ recipientId: mentioned.id, actorId: req.actor!.id, type: "mention", postId: post.id });
+  }
 
   res.status(201).json({ ...withBookmarked, commentCount: 0, boostedBy: null, canEdit: true });
 });
@@ -1316,6 +1327,9 @@ postsRouter.post("/posts/:id/vote", requireAuth, async (req, res) => {
   if (becameLike && !isLocalActor(post.author)) {
     void deliverActivity(req.actor!, post.author.inboxUrl, likeActivity(req.actor!, postObjectIri(post)));
   }
+  if (becameLike) {
+    void notify({ recipientId: post.authorActorId, actorId: req.actor!.id, type: "post_like", postId });
+  }
 
   const [{ score, myVote }] = await attachPostVotes([{ id: postId }], actorId);
   res.json({ score, myVote });
@@ -1372,6 +1386,13 @@ postsRouter.put("/posts/:id/reactions", requireAuth, async (req, res) => {
       reactActivity(req.actor!, postObjectIri(post), emoji, customEmojiImageUrl),
     );
   }
+  void notify({
+    recipientId: post.authorActorId,
+    actorId: req.actor!.id,
+    type: "reaction",
+    postId,
+    reaction: emoji,
+  });
 
   const [{ reactions, myReaction }] = await attachReactions([{ id: postId }], actorId);
   res.json({ reactions, myReaction });
@@ -1511,6 +1532,7 @@ postsRouter.post("/posts/:id/boost", requireAuth, async (req, res) => {
 
   await prisma.postBoost.create({ data: { actorId, postId } });
   void deliverToFollowers(req.actor!, announceActivity(req.actor!, postObjectIri(post)));
+  void notify({ recipientId: post.authorActorId, actorId, type: "boost", postId });
 
   res.status(201).json({ boosted: true });
 });

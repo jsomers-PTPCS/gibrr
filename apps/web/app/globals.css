@@ -802,6 +802,28 @@ select.input:focus {
   padding: 0 4px;
 }
 
+/* Notifications list (app/notifications/page.tsx) — an unread row gets a
+   faint tint of the same purple the rest of the app uses for an active/
+   accent state, not a border or a dot, so the whole row reads as "new"
+   at a glance and fades to plain once marked read. */
+.notif-unread {
+  background: var(--primary-dim);
+}
+
+.notif-unread:hover {
+  background: var(--surface-hover);
+}
+
+.nav-bell {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
+}
+
+.nav-bell:hover {
+  color: var(--accent);
+}
+
 .chat-dock-panel {
   position: fixed;
   right: 1.25rem;

@@ -1727,4 +1727,77 @@ export function removeDirectoryLink(id: string) {
   return apiFetch<void>(`/directory-links/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+// In-app notifications — routes/notifications.ts. Purely local (never
+// federated): a private view onto activity this instance can already
+// see, same as bookmarks/antennas. The single writer is the API's
+// federation/notifications.ts, wired into every follow/friend/family/
+// reply/mention/like/reaction/boost/group-join trigger, local and
+// federated alike.
+export type NotificationType =
+  | "follow"
+  | "follow_request"
+  | "follow_accepted"
+  | "friend_request"
+  | "friend_accepted"
+  | "family_request"
+  | "family_accepted"
+  | "mention"
+  | "reply"
+  | "post_like"
+  | "comment_like"
+  | "reaction"
+  | "boost"
+  | "group_join_request"
+  | "group_join_accepted";
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  read: boolean;
+  createdAt: string;
+  // The emoji, for type "reaction" — raw unicode or a ":shortcode:".
+  reaction: string | null;
+  // Who triggered it. Null only for a (currently unused) system
+  // notification with no acting actor.
+  actor:
+    | (ActorSummary & {
+        id: string;
+        avatarImageUrl: string | null;
+        avatarPreset: AvatarPresetKey | null;
+      })
+    | null;
+  // The subject, when the type has one — bodies are already trimmed to a
+  // short excerpt server-side.
+  post: { id: string; title: string | null; body: string | null } | null;
+  comment: { id: string; postId: string; body: string | null } | null;
+  community: { id: string; title: string; name: string } | null;
+}
+
+export interface NotificationsPage {
+  notifications: AppNotification[];
+  nextCursor: string | null;
+  unreadCount: number;
+}
+
+export function getNotifications(cursor?: string) {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch<NotificationsPage>(`/notifications${query}`);
+}
+
+export function getUnreadNotificationCount() {
+  return apiFetch<{ count: number }>("/notifications/unread-count");
+}
+
+export function markNotificationsRead() {
+  return apiFetch<void>("/notifications/read", { method: "POST" });
+}
+
+export function markNotificationRead(id: string) {
+  return apiFetch<void>(`/notifications/${encodeURIComponent(id)}/read`, { method: "POST" });
+}
+
+export function clearNotifications() {
+  return apiFetch<void>("/notifications", { method: "DELETE" });
+}
+
 export { ApiError };

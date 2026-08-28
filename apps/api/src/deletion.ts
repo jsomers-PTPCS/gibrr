@@ -29,6 +29,12 @@ export async function deletePosts(postIds: string[]): Promise<void> {
     prisma.report.deleteMany({
       where: { OR: [{ targetPostId: { in: postIds } }, { targetCommentId: { in: commentIds } }] },
     }),
+    // Notification FKs to Post/Comment aren't cascaded either — a like/
+    // reply/mention notification pointing at deleted content would block
+    // the delete transaction otherwise.
+    prisma.notification.deleteMany({
+      where: { OR: [{ postId: { in: postIds } }, { commentId: { in: commentIds } }] },
+    }),
     prisma.reaction.deleteMany({ where: { postId: { in: postIds } } }),
     prisma.postRecipient.deleteMany({ where: { postId: { in: postIds } } }),
     prisma.pollVote.deleteMany({ where: { optionId: { in: pollOptionIds } } }),
@@ -64,6 +70,7 @@ export async function deleteCommentSubtree(rootId: string): Promise<void> {
     // Same FK gap as deletePosts above — an open report against one of
     // these comments would otherwise block the delete.
     prisma.report.deleteMany({ where: { targetCommentId: { in: ids } } }),
+    prisma.notification.deleteMany({ where: { commentId: { in: ids } } }),
     prisma.commentVote.deleteMany({ where: { commentId: { in: ids } } }),
     prisma.comment.deleteMany({ where: { id: { in: ids } } }),
   ]);
@@ -142,6 +149,9 @@ export async function deleteActor(actorId: string): Promise<void> {
     // memos other people wrote about this actor (their own private
     // notes, gone the same as any other data tied to a deleted actor).
     prisma.profileMemo.deleteMany({ where: { OR: [{ authorActorId: actorId }, { subjectActorId: actorId }] } }),
+    // Both directions — notifications this actor is the recipient of, and
+    // ones they triggered for someone else.
+    prisma.notification.deleteMany({ where: { OR: [{ recipientId: actorId }, { actorId }] } }),
 
     // Graph edges, both directions.
     prisma.follow.deleteMany({ where: { OR: [{ followerId: actorId }, { followingId: actorId }] } }),

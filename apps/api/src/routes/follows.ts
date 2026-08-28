@@ -7,6 +7,7 @@ import { localDomain, actorIri, isLocalActor } from "../federation/localActor.js
 import { discoverActor, fetchRemoteActor, upsertRemoteActor } from "../federation/remoteActor.js";
 import { deliverActivity } from "../federation/deliver.js";
 import { followActivity, undoFollowActivity } from "../federation/activities.js";
+import { notify } from "../federation/notifications.js";
 
 export const followsRouter = Router();
 
@@ -37,6 +38,8 @@ export async function followActor(follower: Actor, target: Actor): Promise<Follo
 
   if (!local) {
     await deliverActivity(follower, target.inboxUrl, followActivity(follower, actorIri(target)));
+  } else {
+    void notify({ recipientId: target.id, actorId: follower.id, type: "follow" });
   }
 
   return { status: "followed", state: follow.state };

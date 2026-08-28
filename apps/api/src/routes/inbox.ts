@@ -18,6 +18,7 @@ import {
 } from "../federation/remotePost.js";
 import { deletePosts, deleteCommentSubtree } from "../deletion.js";
 import { isDomainBlocked } from "../federation/domainBlocks.js";
+import { notify, notifyMany } from "../federation/notifications.js";
 
 export const inboxRouter = Router();
 
@@ -275,7 +276,8 @@ async function processIncomingNote(remote: Actor, note: Record<string, unknown>)
       }
     }
 
-    await prisma.comment.upsert({
+    const isNewReply = !(await prisma.comment.findUnique({ where: { remoteId }, select: { id: true } }));
+    const savedReply = await prisma.comment.upsert({
       where: { remoteId },
       create: {
         remoteId,
@@ -287,6 +289,17 @@ async function processIncomingNote(remote: Actor, note: Record<string, unknown>)
       },
       update: { body },
     });
+    // Only the first delivery of a given reply is notification-worthy — a
+    // redelivery/edit of the same remote object shouldn't re-alert.
+    if (isNewReply && parentAuthorId) {
+      void notify({
+        recipientId: parentAuthorId,
+        actorId: remote.id,
+        type: "reply",
+        postId: parent.postId,
+        commentId: savedReply.id,
+      });
+    }
     console.log(`[inbox] ${remote.username}@${remote.domain} replied to one of our ${parent.kind}s`);
     return;
   }
@@ -347,7 +360,8 @@ async function processIncomingNote(remote: Actor, note: Record<string, unknown>)
   const pollMultiple = Array.isArray(note.anyOf);
   const pollExpiresAt = typeof note.endTime === "string" ? new Date(note.endTime) : null;
 
-  await prisma.post.upsert({
+  const wasCached = !!(await prisma.post.findUnique({ where: { remoteId }, select: { id: true } }));
+  const cachedPost = await prisma.post.upsert({
     where: { remoteId },
     create: {
       remoteId,
@@ -370,6 +384,14 @@ async function processIncomingNote(remote: Actor, note: Record<string, unknown>)
     },
     update: { body, hashtags, contentWarning, sensitive, ...media },
   });
+  // @mention notifications — first delivery only, and only for the local
+  // actors named in the Note's tag array whose block didn't already drop
+  // it above (notify() re-checks blocks anyway).
+  if (!wasCached) {
+    for (const id of mentionedIds) {
+      void notify({ recipientId: id, actorId: remote.id, type: "mention", postId: cachedPost.id });
+    }
+  }
   console.log(`[inbox] cached a post from ${remote.username}@${remote.domain}`);
 }
 
@@ -412,22 +434,49 @@ async function processIncomingLike(remote: Actor, object: unknown, content?: str
       create: { postId: target.postId, actorId: remote.id, emoji: content },
       update: { emoji: content },
     });
+    if (targetAuthorId) {
+      void notify({
+        recipientId: targetAuthorId,
+        actorId: remote.id,
+        type: "reaction",
+        postId: target.postId,
+        reaction: content,
+      });
+    }
     console.log(`[inbox] ${remote.username}@${remote.domain} reacted to one of our posts`);
     return;
   }
 
   if (target.kind === "post") {
+    const already = await prisma.postVote.findUnique({
+      where: { postId_actorId: { postId: target.postId, actorId: remote.id } },
+    });
     await prisma.postVote.upsert({
       where: { postId_actorId: { postId: target.postId, actorId: remote.id } },
       create: { postId: target.postId, actorId: remote.id, value: 1 },
       update: { value: 1 },
     });
+    if (!already && targetAuthorId) {
+      void notify({ recipientId: targetAuthorId, actorId: remote.id, type: "post_like", postId: target.postId });
+    }
   } else {
+    const already = await prisma.commentVote.findUnique({
+      where: { commentId_actorId: { commentId: target.commentId, actorId: remote.id } },
+    });
     await prisma.commentVote.upsert({
       where: { commentId_actorId: { commentId: target.commentId, actorId: remote.id } },
       create: { commentId: target.commentId, actorId: remote.id, value: 1 },
       update: { value: 1 },
     });
+    if (!already && targetAuthorId) {
+      void notify({
+        recipientId: targetAuthorId,
+        actorId: remote.id,
+        type: "comment_like",
+        postId: target.postId,
+        commentId: target.commentId,
+      });
+    }
   }
   console.log(`[inbox] ${remote.username}@${remote.domain} liked one of our ${target.kind}s`);
 }
@@ -459,11 +508,20 @@ async function processIncomingAnnounce(remote: Actor, object: unknown, signAs: A
     return;
   }
 
+  const alreadyBoosted = await prisma.postBoost.findUnique({
+    where: { actorId_postId: { actorId: remote.id, postId } },
+  });
   await prisma.postBoost.upsert({
     where: { actorId_postId: { actorId: remote.id, postId } },
     create: { actorId: remote.id, postId },
     update: {},
   });
+  if (!alreadyBoosted) {
+    const boosted = await prisma.post.findUnique({ where: { id: postId }, select: { authorActorId: true } });
+    if (boosted) {
+      void notify({ recipientId: boosted.authorActorId, actorId: remote.id, type: "boost", postId });
+    }
+  }
   console.log(`[inbox] ${remote.username}@${remote.domain} boosted a post`);
 }
 
@@ -702,14 +760,34 @@ async function processInboxActivity(
         );
         if (state === "accepted") {
           await deliverActivity(targetActor, remote.inboxUrl, acceptActivity(targetActor, activity));
+        } else {
+          const managers = await prisma.communityMembership.findMany({
+            where: {
+              communityId: community.id,
+              state: "accepted",
+              role: { in: ["owner", "admin", "moderator"] },
+            },
+            select: { actorId: true },
+          });
+          void notifyMany(managers.map((m) => m.actorId), {
+            actorId: remote.id,
+            type: "group_join_request",
+            communityId: community.id,
+          });
         }
       }
     } else {
+      const alreadyFollowed = await prisma.follow.findUnique({
+        where: { followerId_followingId: { followerId: remote.id, followingId: targetActor.id } },
+      });
       await prisma.follow.upsert({
         where: { followerId_followingId: { followerId: remote.id, followingId: targetActor.id } },
         create: { followerId: remote.id, followingId: targetActor.id, state: "accepted" },
         update: { state: "accepted" },
       });
+      if (!alreadyFollowed) {
+        void notify({ recipientId: targetActor.id, actorId: remote.id, type: "follow" });
+      }
       console.log(`[inbox] ${remote.username}@${remote.domain} followed ${targetActor.username}`);
       // Complete the handshake — without this the follower's server has no
       // way to know we accepted (Mastodon et al. won't show the relationship
@@ -731,10 +809,13 @@ async function processInboxActivity(
       }
       console.log(`[inbox] ${remote.username}@${remote.domain} accepted ${targetActor.username}'s join request`);
     } else {
-      await prisma.follow.updateMany({
+      const { count } = await prisma.follow.updateMany({
         where: { followerId: targetActor.id, followingId: remote.id, state: "pending" },
         data: { state: "accepted" },
       });
+      if (count > 0) {
+        void notify({ recipientId: targetActor.id, actorId: remote.id, type: "follow_accepted" });
+      }
       console.log(`[inbox] ${remote.username}@${remote.domain} accepted ${targetActor.username}'s follow`);
     }
   } else if (activity.type === "Undo" && typeof object === "object" && object?.type === "Follow" && targetActor) {

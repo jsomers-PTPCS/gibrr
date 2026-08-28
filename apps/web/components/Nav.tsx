@@ -14,6 +14,7 @@ import {
 import { Avatar } from "./Avatar";
 import { Logo } from "./Logo";
 import { LoopsIcon, FederatedIcon } from "./icons";
+import { NotificationBell } from "./NotificationBell";
 
 export function Nav() {
   const router = useRouter();
@@ -141,6 +142,7 @@ export function Nav() {
           there's nothing else on mobile to reach them from now that
           there's no hamburger panel for them to live in. */}
       <div className="nav-account">
+      <NotificationBell />
       {me === "loading" ? null : me ? (
         <>
           {/* Straight to the profile page — Settings and Log out live

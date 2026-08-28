@@ -13,6 +13,7 @@ import {
   commentObjectIri,
 } from "../federation/activities.js";
 import { deliverToFollowers, deliverActivity } from "../federation/deliver.js";
+import { notify } from "../federation/notifications.js";
 
 export const commentsRouter = Router();
 
@@ -147,6 +148,15 @@ commentsRouter.post("/posts/:postId/comments", requireAuth, async (req, res) => 
   if (replyTarget.id !== req.actor!.id && !isLocalActor(replyTarget)) {
     void deliverActivity(req.actor!, replyTarget.inboxUrl, createActivity(note, req.actor!));
   }
+  // In-app notification for a local reply target — the federated case is
+  // covered by the remote actor's own server processing the Create above.
+  void notify({
+    recipientId: replyTarget.id,
+    actorId: req.actor!.id,
+    type: "reply",
+    postId,
+    commentId: comment.id,
+  });
 
   res.status(201).json({ ...comment, score: 0, myVote: null });
 });
@@ -186,6 +196,15 @@ commentsRouter.post("/comments/:id/vote", requireAuth, async (req, res) => {
       comment.author.inboxUrl,
       likeActivity(req.actor!, commentObjectIri(comment)),
     );
+  }
+  if (becameLike) {
+    void notify({
+      recipientId: comment.authorActorId,
+      actorId: req.actor!.id,
+      type: "comment_like",
+      postId: comment.postId,
+      commentId: comment.id,
+    });
   }
 
   const [{ score, myVote }] = await attachCommentVotes([{ id: commentId }], actorId);

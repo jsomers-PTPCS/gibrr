@@ -3,6 +3,7 @@ import { z } from "zod";
 import { FamilyRelationType } from "@prisma/client";
 import { prisma } from "../db.js";
 import { requireAuth, optionalAuth } from "../auth/session.js";
+import { notify } from "../federation/notifications.js";
 
 export const familyRouter = Router();
 
@@ -65,6 +66,8 @@ familyRouter.post("/family/link", requireAuth, async (req, res) => {
     },
   });
 
+  void notify({ recipientId: relative.id, actorId: req.actor!.id, type: "family_request" });
+
   res.status(201).json({ id: link.id, state: link.state });
 });
 
@@ -77,6 +80,7 @@ familyRouter.post("/family/confirm/:linkId", requireAuth, async (req, res) => {
   }
 
   await prisma.familyLink.update({ where: { id: link.id }, data: { state: "accepted" } });
+  void notify({ recipientId: link.actorId, actorId: req.actor!.id, type: "family_accepted" });
   res.json({ accepted: true });
 });
 

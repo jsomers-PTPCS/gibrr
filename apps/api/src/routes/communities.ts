@@ -10,6 +10,7 @@ import { deliverActivity } from "../federation/deliver.js";
 import { followActivity, acceptActivity, undoFollowActivity, updateActorActivity } from "../federation/activities.js";
 import { requireAuth, optionalAuth } from "../auth/session.js";
 import { deletePosts } from "../deletion.js";
+import { notify, notifyMany } from "../federation/notifications.js";
 
 export const communitiesRouter = Router();
 
@@ -253,6 +254,21 @@ communitiesRouter.post("/communities/:id/join", requireAuth, async (req, res) =>
     data: { actorId: req.actor!.id, communityId: community.id, role: "member", state },
   });
 
+  // A pending request needs an approver — notify everyone who can act on
+  // it (owner/admin/moderator). A public join is instant, nothing to
+  // approve, so no notification.
+  if (state === "pending") {
+    const managers = await prisma.communityMembership.findMany({
+      where: { communityId: community.id, state: "accepted", role: { in: ["owner", "admin", "moderator"] } },
+      select: { actorId: true },
+    });
+    void notifyMany(managers.map((m) => m.actorId), {
+      actorId: req.actor!.id,
+      type: "group_join_request",
+      communityId: community.id,
+    });
+  }
+
   res.status(201).json({ state });
 });
 
@@ -363,6 +379,13 @@ communitiesRouter.post("/communities/:id/members/:username/approve", requireAuth
       target.inboxUrl,
       acceptActivity(community.actor, followActivity(target, actorIri(community.actor))),
     );
+  } else {
+    void notify({
+      recipientId: target.id,
+      actorId: req.actor!.id,
+      type: "group_join_accepted",
+      communityId: community.id,
+    });
   }
 
   res.json({ approved: true });
@@ -519,6 +542,7 @@ communitiesRouter.delete("/communities/:id", requireAuth, async (req, res) => {
 
   await deletePosts(posts.map((p) => p.id));
   await prisma.$transaction([
+    prisma.notification.deleteMany({ where: { communityId: community.id } }),
     prisma.communityMembership.deleteMany({ where: { communityId: community.id } }),
     prisma.community.delete({ where: { id: community.id } }),
   ]);

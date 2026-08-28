@@ -153,6 +153,9 @@ model Actor {
   photos           Photo[]
   immichConnection ImmichConnection?
 
+  notificationsReceived  Notification[] @relation("NotificationRecipient")
+  notificationsTriggered Notification[] @relation("NotificationActor")
+
   @@unique([username, domain])
 }
 
@@ -363,6 +366,7 @@ model Community {
   actor   Actor                 @relation(fields: [actorId], references: [id])
   posts   Post[]
   members CommunityMembership[]
+  notifications Notification[]
 }
 
 model Post {
@@ -489,6 +493,7 @@ model Post {
   bookmarks     Bookmark[]
   exploreCachedIn ExploreCachedPost[]
   rssCachedIn     RssCachedPost?
+  notifications   Notification[]
 }
 
 // Ordered options for a poll post — `position` preserves the author's
@@ -710,6 +715,7 @@ model Comment {
   replies Comment[]     @relation("CommentReplies")
   votes   CommentVote[]
   reports Report[]
+  notifications Notification[]
 }
 
 model PostVote {
@@ -859,6 +865,64 @@ model Report {
   target   Actor    @relation("ReportedActor", fields: [targetActorId], references: [id])
   post     Post?    @relation(fields: [targetPostId], references: [id])
   comment  Comment? @relation(fields: [targetCommentId], references: [id])
+}
+
+enum NotificationType {
+  follow             // someone followed you (accepted immediately)
+  follow_request     // reserved — this app auto-accepts Person follows, unused for now
+  follow_accepted    // a remote actor accepted the follow you sent
+  friend_request     // someone sent you a friend request
+  friend_accepted    // someone accepted your friend request
+  family_request     // someone tagged you as a relative (needs your confirmation)
+  family_accepted    // someone confirmed the family link you proposed
+  mention            // you were @mentioned in a post
+  reply              // someone replied to your post or comment
+  post_like          // someone upvoted/liked your post
+  comment_like       // someone upvoted/liked your comment
+  reaction           // someone left an emoji reaction on your post
+  boost              // someone boosted/reshared your post
+  group_join_request // someone asked to join a group you manage
+  group_join_accepted // a group approved your join request
+}
+
+// One row per thing-worth-telling-a-local-actor-about. Only ever created
+// for a *local* recipient (a remote actor's own server handles its
+// notifications) — see federation/notifications.ts's notify(), the single
+// writer, which also drops self-notifications and anything from a blocked
+// actor, and de-dupes toggle-happy interactions (like/unlike/re-like,
+// react/re-react) down to one row that just bumps back to unread rather
+// than stacking. Deliberately never federated: this is a private,
+// local-only view onto activity the instance can already see, same
+// posture as Bookmark/Antenna/ProfileMemo.
+//
+// actorId is nullable for a future system notification with no triggering
+// actor; every type above currently sets it. postId/commentId/communityId
+// pin the subject so the frontend can link straight to it — all nullable,
+// only the ones relevant to a given type are set. None of these relations
+// cascade at the DB level, so deletion.ts clears matching rows before
+// deleting the actor/post/comment they point at.
+model Notification {
+  id          String           @id @default(uuid())
+  recipientId String
+  actorId     String?
+  type        NotificationType
+  postId      String?
+  commentId   String?
+  communityId String?
+  // The emoji, for type = reaction — a raw unicode character/sequence or
+  // a ":shortcode:" (same convention as Reaction.emoji).
+  reaction    String?
+  read        Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  recipient Actor      @relation("NotificationRecipient", fields: [recipientId], references: [id])
+  actor     Actor?     @relation("NotificationActor", fields: [actorId], references: [id])
+  post      Post?      @relation(fields: [postId], references: [id])
+  comment   Comment?   @relation(fields: [commentId], references: [id])
+  community Community?  @relation(fields: [communityId], references: [id])
+
+  @@index([recipientId, read])
+  @@index([recipientId, createdAt])
 }
 
 // Optional connection to a self-hosted Immich server — credentials live

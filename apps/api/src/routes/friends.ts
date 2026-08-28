@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../db.js";
 import { requireAuth, optionalAuth } from "../auth/session.js";
+import { notify } from "../federation/notifications.js";
 
 export const friendsRouter = Router();
 
@@ -54,6 +55,7 @@ friendsRouter.post("/friends/request/:username", requireAuth, async (req, res) =
   await prisma.friendship.create({
     data: { requesterId: req.actor!.id, addresseeId: target.id },
   });
+  void notify({ recipientId: target.id, actorId: req.actor!.id, type: "friend_request" });
 
   res.status(201).json({ requested: true });
 });
@@ -72,6 +74,7 @@ friendsRouter.post("/friends/accept/:username", requireAuth, async (req, res) =>
   }
 
   await prisma.friendship.update({ where: { id: friendship.id }, data: { state: "accepted" } });
+  void notify({ recipientId: requester.id, actorId: req.actor!.id, type: "friend_accepted" });
   res.json({ accepted: true });
 });
 

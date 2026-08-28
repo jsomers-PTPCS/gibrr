@@ -242,6 +242,18 @@ export function CirclesIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// Nav.tsx / BottomTabBar.tsx notifications bell — filled for the
+// unread-present state, same on/off-without-a-color-change convention as
+// BoostIcon/BookmarkIcon.
+export function BellIcon({ filled = false, ...props }: SVGProps<SVGSVGElement> & { filled?: boolean }) {
+  return (
+    <Icon {...props} fill={filled ? "currentColor" : "none"}>
+      <path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6.5H4c.5-1 2-2.5 2-6.5Z" />
+      <path d="M10 19a2 2 0 0 0 4 0" />
+    </Icon>
+  );
+}
+
 // BookwyrmTab.tsx's star rating — rendered twice per star (outline,
 // then a width-clipped filled copy) to draw BookWyrm's half-star
 // increments precisely, rather than swapping in a separate half-star
