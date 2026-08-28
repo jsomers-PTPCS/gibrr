@@ -127,6 +127,14 @@ export function Nav() {
         </form>
       </div>
 
+      {/* Direct child of .nav (not inside .nav-account) so CSS `order` can
+          place it per breakpoint: on mobile it sits immediately right of
+          the search bar (order 3, before the Fediverse icon); on desktop
+          it stays in the right-hand account cluster, just left of the
+          profile link (.nav-bell order 3 < .nav-account order 4, both
+          after the flex spacer). Renders null when logged out. */}
+      <NotificationBell />
+
       {/* Inverse of .nav-loops-icon above — hidden on desktop (where
           "Fediverse" already shows as a plain text link just above),
           shown only on mobile, top-right (see .nav-federated-icon's
@@ -142,7 +150,6 @@ export function Nav() {
           there's nothing else on mobile to reach them from now that
           there's no hamburger panel for them to live in. */}
       <div className="nav-account">
-      <NotificationBell />
       {me === "loading" ? null : me ? (
         <>
           {/* Straight to the profile page — Settings and Log out live

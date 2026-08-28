@@ -396,6 +396,9 @@ select.input:focus {
   align-items: center;
   gap: 0.75rem;
   flex-shrink: 0;
+  /* Sits after .nav-bell (order 3) in the right-hand cluster — see
+     .nav-bell. The mobile media query repeats this same value. */
+  order: 4;
 }
 
 /* Real CSS rule, not Nav.tsx's old inline style — an inline style always
@@ -814,10 +817,19 @@ select.input:focus {
   background: var(--surface-hover);
 }
 
+/* A direct flex child of .nav (not inside .nav-account), positioned with
+   `order`. Desktop: order 3 < .nav-account's 4, both after the flex
+   spacer, so it lands just left of the profile link exactly where it
+   used to render. Mobile (media query below): still order 3, which is
+   right after .nav-links (search, order 2) and before .nav-federated-icon
+   (also order 3, but later in source) — i.e. immediately right of the
+   search bar. */
 .nav-bell {
   display: inline-flex;
   align-items: center;
   color: var(--text-dim);
+  order: 3;
+  flex-shrink: 0;
 }
 
 .nav-bell:hover {
