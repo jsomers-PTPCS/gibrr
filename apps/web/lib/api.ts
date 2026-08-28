@@ -1143,7 +1143,21 @@ export type FollowStatus = "self" | "none" | "pending" | "accepted";
 
 export function getFollowStatus(username: string, domain?: string) {
   const query = domain ? `?domain=${encodeURIComponent(domain)}` : "";
-  return apiFetch<{ status: FollowStatus }>(`/follows/status/${encodeURIComponent(username)}${query}`);
+  // `notify` is the per-follow "bell" (Follow.notifyOnPost) — only ever
+  // true on an accepted follow. Absent/false otherwise.
+  return apiFetch<{ status: FollowStatus; notify: boolean }>(
+    `/follows/status/${encodeURIComponent(username)}${query}`,
+  );
+}
+
+// Toggles the per-follow bell — a notification every time that account
+// posts, on top of their posts already showing in the feed. Only valid
+// on an accepted follow.
+export function setFollowNotify(actorId: string, notify: boolean) {
+  return apiFetch<{ notify: boolean }>(`/follows/${encodeURIComponent(actorId)}/notify`, {
+    method: "POST",
+    body: JSON.stringify({ notify }),
+  });
 }
 
 // A live lookup of a handle typed into the follow box — not a fuzzy
@@ -1748,7 +1762,8 @@ export type NotificationType =
   | "reaction"
   | "boost"
   | "group_join_request"
-  | "group_join_accepted";
+  | "group_join_accepted"
+  | "followed_post";
 
 export interface AppNotification {
   id: string;

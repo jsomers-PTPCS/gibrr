@@ -143,7 +143,29 @@ followsRouter.get("/follows/status/:username", optionalAuth, async (req, res) =>
   const follow = await prisma.follow.findUnique({
     where: { followerId_followingId: { followerId: req.actor.id, followingId: other.id } },
   });
-  res.json({ status: follow?.state ?? "none" });
+  res.json({ status: follow?.state ?? "none", notify: follow?.notifyOnPost ?? false });
+});
+
+// POST /follows/:actorId/notify { notify: boolean } -> toggles the
+// per-follow "bell" (Follow.notifyOnPost): a notification every time
+// that account posts, on top of their posts already showing in the
+// feed. Only valid on an accepted follow the caller owns.
+followsRouter.post("/follows/:actorId/notify", requireAuth, async (req, res) => {
+  const parsed = z.object({ notify: z.boolean() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const follow = await prisma.follow.findUnique({
+    where: { followerId_followingId: { followerId: req.actor!.id, followingId: req.params.actorId } },
+  });
+  if (!follow || follow.state !== "accepted") {
+    return res.status(404).json({ error: "not following that account" });
+  }
+
+  await prisma.follow.update({
+    where: { id: follow.id },
+    data: { notifyOnPost: parsed.data.notify },
+  });
+  res.json({ notify: parsed.data.notify });
 });
 
 // GET /follows/preview?handle=user@domain -> live lookup for the handle

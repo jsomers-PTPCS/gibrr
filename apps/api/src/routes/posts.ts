@@ -31,7 +31,7 @@ import { deliverToFollowers, deliverActivity } from "../federation/deliver.js";
 import { deletePosts } from "../deletion.js";
 import { extractHashtagTokens, extractMentionTokens } from "../federation/textEntities.js";
 import { resolveMentions } from "../federation/mentions.js";
-import { notify } from "../federation/notifications.js";
+import { notify, notifyBellFollowers } from "../federation/notifications.js";
 import { resolveAndCacheRemotePost } from "../federation/remotePost.js";
 import { fetchLiveCounts } from "../federation/remoteEngagement.js";
 
@@ -408,6 +408,14 @@ postsRouter.post("/posts", requireAuth, async (req, res) => {
   const mentionRecipients = visibility === "specified" ? recipientActors : mentionedActors;
   for (const mentioned of mentionRecipients) {
     void notify({ recipientId: mentioned.id, actorId: req.actor!.id, type: "mention", postId: post.id });
+  }
+
+  // Per-follow "bell" — followers who opted into being pinged on every
+  // post. Skipped for "specified" notes (they only reach their named
+  // recipients, not the follow graph); every other visibility lands in a
+  // follower's feed, so it's fair game.
+  if (visibility !== "specified") {
+    void notifyBellFollowers(req.actor!.id, post.id);
   }
 
   res.status(201).json({ ...withBookmarked, commentCount: 0, boostedBy: null, canEdit: true });

@@ -18,7 +18,7 @@ import {
 } from "../federation/remotePost.js";
 import { deletePosts, deleteCommentSubtree } from "../deletion.js";
 import { isDomainBlocked } from "../federation/domainBlocks.js";
-import { notify, notifyMany } from "../federation/notifications.js";
+import { notify, notifyMany, notifyBellFollowers } from "../federation/notifications.js";
 
 export const inboxRouter = Router();
 
@@ -391,6 +391,9 @@ async function processIncomingNote(remote: Actor, note: Record<string, unknown>)
     for (const id of mentionedIds) {
       void notify({ recipientId: id, actorId: remote.id, type: "mention", postId: cachedPost.id });
     }
+    // Per-follow "bell" — local followers of this remote actor who opted
+    // into a ping on every post.
+    void notifyBellFollowers(remote.id, cachedPost.id);
   }
   console.log(`[inbox] cached a post from ${remote.username}@${remote.domain}`);
 }

@@ -169,6 +169,12 @@ model Follow {
   followerId  String
   followingId String
   state       FollowState @default(pending)
+  // The follower opted into a notification every time this account posts
+  // (Mastodon's per-follow "bell"). Off by default — a plain follow just
+  // means "their posts show in my feed"; this is the extra "ping me."
+  // Only meaningful on an accepted follow. Set via
+  // POST /follows/:actorId/notify.
+  notifyOnPost Boolean    @default(false)
   createdAt   DateTime    @default(now())
 
   follower  Actor @relation("FollowerActor", fields: [followerId], references: [id])
@@ -883,6 +889,7 @@ enum NotificationType {
   boost              // someone boosted/reshared your post
   group_join_request // someone asked to join a group you manage
   group_join_accepted // a group approved your join request
+  followed_post      // an account you turned the bell on for just posted
 }
 
 // One row per thing-worth-telling-a-local-actor-about. Only ever created

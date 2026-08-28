@@ -66,6 +66,27 @@ export async function notify(params: {
   }
 }
 
+// Called when `authorId` publishes a post: pings every local follower who
+// turned the per-follow bell on (Follow.notifyOnPost). Fire-and-forget
+// alongside the post's own follower delivery. Safe to call for any post —
+// notify() itself drops self/blocked/non-local, and callers skip the
+// visibilities that never reach followers ("specified").
+export async function notifyBellFollowers(authorId: string, postId: string): Promise<void> {
+  try {
+    const follows = await prisma.follow.findMany({
+      where: { followingId: authorId, state: "accepted", notifyOnPost: true },
+      select: { followerId: true },
+    });
+    await Promise.all(
+      follows.map((f) =>
+        notify({ recipientId: f.followerId, actorId: authorId, type: "followed_post", postId }),
+      ),
+    );
+  } catch (err) {
+    logger.warn({ err, authorId, postId }, "failed to notify bell followers");
+  }
+}
+
 // Fan-out helper for the group-join case, where "who manages this group"
 // is several local actors (owner + admins + moderators). Skips the
 // triggering actor automatically via notify()'s own self-check.

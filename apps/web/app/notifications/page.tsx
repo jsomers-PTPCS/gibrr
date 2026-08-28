@@ -100,6 +100,12 @@ function describe(n: AppNotification): { text: ReactNode; href: string; excerpt:
         href: postHref,
         excerpt: n.post?.title ?? n.post?.body ?? null,
       };
+    case "followed_post":
+      return {
+        text: <>{who} posted</>,
+        href: postHref,
+        excerpt: n.post?.title ?? n.post?.body ?? null,
+      };
     case "group_join_request":
       return { text: <>{who} asked to join {groupName}</>, href: groupHref, excerpt: null };
     case "group_join_accepted":
