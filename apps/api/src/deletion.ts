@@ -152,6 +152,7 @@ export async function deleteActor(actorId: string): Promise<void> {
     // Both directions — notifications this actor is the recipient of, and
     // ones they triggered for someone else.
     prisma.notification.deleteMany({ where: { OR: [{ recipientId: actorId }, { actorId }] } }),
+    prisma.pushSubscription.deleteMany({ where: { actorId } }),
 
     // Graph edges, both directions.
     prisma.follow.deleteMany({ where: { OR: [{ followerId: actorId }, { followingId: actorId }] } }),

@@ -2,6 +2,93 @@ import type { NotificationType } from "@prisma/client";
 import { prisma } from "../db.js";
 import { localDomain } from "./localActor.js";
 import { logger } from "../logger.js";
+import { pushConfigured, sendPushToActor } from "./webPush.js";
+
+// Plain-text notification copy, shared by the Web Push payload here and
+// mirrored by the frontend's own describe() for the in-app list. Kept
+// terse — a push body is a single tray line.
+function pushText(type: NotificationType, who: string, reaction: string | null): string {
+  switch (type) {
+    case "follow":
+      return `${who} followed you`;
+    case "follow_request":
+      return `${who} requested to follow you`;
+    case "follow_accepted":
+      return `${who} accepted your follow request`;
+    case "friend_request":
+      return `${who} sent you a friend request`;
+    case "friend_accepted":
+      return `${who} accepted your friend request`;
+    case "family_request":
+      return `${who} tagged you as family`;
+    case "family_accepted":
+      return `${who} confirmed your family link`;
+    case "mention":
+      return `${who} mentioned you`;
+    case "reply":
+      return `${who} replied to you`;
+    case "post_like":
+      return `${who} liked your post`;
+    case "comment_like":
+      return `${who} liked your comment`;
+    case "reaction":
+      return reaction && !reaction.startsWith(":")
+        ? `${who} reacted ${reaction} to your post`
+        : `${who} reacted to your post`;
+    case "boost":
+      return `${who} boosted your post`;
+    case "group_join_request":
+      return `${who} asked to join a group you manage`;
+    case "group_join_accepted":
+      return `Your group join request was approved`;
+    case "followed_post":
+      return `${who} posted`;
+    default:
+      return "New activity on Gibrr";
+  }
+}
+
+// Where a notificationclick should land — a path on the web origin, which
+// is where the service worker runs (so relative paths resolve there, not
+// against the API).
+function pushUrl(n: {
+  type: NotificationType;
+  post: { id: string } | null;
+  comment: { postId: string } | null;
+  community: { actor: { username: string } } | null;
+}): string {
+  if (n.post) return `/posts/${n.post.id}`;
+  if (n.comment) return `/posts/${n.comment.postId}`;
+  if (n.community) return `/g/${n.community.actor.username}`;
+  return "/notifications";
+}
+
+async function firePush(notificationId: string): Promise<void> {
+  if (!pushConfigured()) return;
+  try {
+    const n = await prisma.notification.findUnique({
+      where: { id: notificationId },
+      include: {
+        actor: { select: { displayName: true, username: true } },
+        post: { select: { id: true } },
+        comment: { select: { postId: true } },
+        community: { select: { actor: { select: { username: true } } } },
+      },
+    });
+    if (!n) return;
+    const who = n.actor ? n.actor.displayName ?? n.actor.username : "Someone";
+    await sendPushToActor(n.recipientId, {
+      title: "Gibrr",
+      body: pushText(n.type, who, n.reaction),
+      url: pushUrl(n),
+      // One tray slot per (type, actor) — a re-like replaces rather than
+      // stacks, matching notify()'s own row-level dedupe.
+      tag: `${n.type}:${n.actorId ?? "system"}`,
+    });
+  } catch (err) {
+    logger.warn({ err, notificationId }, "web push dispatch failed");
+  }
+}
 
 // The single writer for the Notification table. Call it fire-and-forget
 // (`void notify({...})`) from every place a local actor should be told
@@ -58,9 +145,10 @@ export async function notify(params: {
       });
     }
 
-    await prisma.notification.create({
+    const created = await prisma.notification.create({
       data: { recipientId, type, actorId, postId, commentId, communityId, reaction },
     });
+    void firePush(created.id);
   } catch (err) {
     logger.warn({ err, type, recipientId }, "failed to create notification");
   }

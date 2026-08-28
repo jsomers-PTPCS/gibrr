@@ -12,6 +12,7 @@ import {
 } from "../../lib/api";
 import { Avatar } from "../../components/Avatar";
 import { emitNotificationCount } from "../../components/NotificationBell";
+import { PushToggle } from "../../components/PushToggle";
 import { timeAgo } from "../../lib/timeAgo";
 
 // The actor's `domain` is the API server's domain, not the web origin —
@@ -190,6 +191,8 @@ export default function NotificationsPage() {
           </button>
         )}
       </div>
+
+      <PushToggle />
 
       {items === "loading" && <p className="text-dim">Loading…</p>}
       {items === "error" && <p className="error-text">Could not load notifications.</p>}

@@ -70,6 +70,28 @@ docker compose -p gibrr -f docker-compose.prod.yml --env-file .env.prod up -d --
 
 Migrations run automatically on the API container's next start.
 
+## Push notifications (optional)
+
+Phone/desktop push (an OS notification even when Gibrr is closed) needs a
+VAPID keypair. Generate one:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Add the pair to `.env.prod` and re-run the update command above:
+
+```
+VAPID_PUBLIC_KEY=B...
+VAPID_PRIVATE_KEY=...
+VAPID_SUBJECT=mailto:you@yourdomain
+```
+
+Leave them unset and push simply stays off — the in-app notification
+list still works, users just don't get pushed alerts. Each user then
+opts in per device from the Notifications page. On iOS this only works
+for the installed PWA (Add to Home Screen), iOS 16.4+.
+
 ## Backing up
 
 Back up the `gibrr_gibrr_postgres_data` and `gibrr_gibrr_uploads_data`

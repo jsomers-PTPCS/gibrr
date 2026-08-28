@@ -1815,4 +1815,30 @@ export function clearNotifications() {
   return apiFetch<void>("/notifications", { method: "DELETE" });
 }
 
+// Web Push (routes/push.ts). getVapidPublicKey rejects with a 404
+// ApiError when the instance has no VAPID keypair configured — callers
+// treat that as "push unavailable here" and hide the toggle.
+export function getVapidPublicKey() {
+  return apiFetch<{ key: string }>("/push/vapid-public-key");
+}
+
+export interface PushSubscriptionInput {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+export function savePushSubscription(sub: PushSubscriptionInput) {
+  return apiFetch<{ subscribed: true }>("/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify(sub),
+  });
+}
+
+export function deletePushSubscription(endpoint: string) {
+  return apiFetch<void>("/push/unsubscribe", {
+    method: "POST",
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
 export { ApiError };

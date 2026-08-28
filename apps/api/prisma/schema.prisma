@@ -155,6 +155,7 @@ model Actor {
 
   notificationsReceived  Notification[] @relation("NotificationRecipient")
   notificationsTriggered Notification[] @relation("NotificationActor")
+  pushSubscriptions      PushSubscription[]
 
   @@unique([username, domain])
 }
@@ -930,6 +931,28 @@ model Notification {
 
   @@index([recipientId, read])
   @@index([recipientId, createdAt])
+}
+
+// A Web Push (RFC 8291) subscription — one per browser/device per local
+// account. The browser hands the frontend an endpoint URL at its push
+// service (FCM/Mozilla/Apple) plus two keys; federation/webPush.ts signs
+// each outgoing push with the instance's VAPID keypair (env). Purely a
+// delivery-transport record, never federated. A push that comes back
+// 404/410 means the browser dropped the subscription — webPush.ts prunes
+// those rows on send. endpoint is unique so re-subscribing the same
+// browser updates its row (and can move it to a different account)
+// rather than piling up duplicates.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  actorId   String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  actor Actor @relation(fields: [actorId], references: [id])
+
+  @@index([actorId])
 }
 
 // Optional connection to a self-hosted Immich server — credentials live

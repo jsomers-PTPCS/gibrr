@@ -52,6 +52,10 @@ services:
       WEB_ORIGIN: https://${WEB_DOMAIN}
       NODE_ENV: production
       LIBRETRANSLATE_URL: http://libretranslate:5000
+      # Web Push — unset in .env.prod ⇒ push notifications stay disabled.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
     volumes:
       - gibrr_uploads_data:/app/apps/api/uploads
     expose:

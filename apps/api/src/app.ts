@@ -36,6 +36,7 @@ import { rssRouter } from "./routes/rss.js";
 import { ghostRouter } from "./routes/ghost.js";
 import { translateRouter } from "./routes/translate.js";
 import { notificationsRouter } from "./routes/notifications.js";
+import { pushRouter } from "./routes/push.js";
 import { UPLOADS_DIR } from "./uploads.js";
 
 declare global {
@@ -133,6 +134,7 @@ export function createApp() {
   app.use(ghostRouter);
   app.use(translateRouter);
   app.use(notificationsRouter);
+  app.use(pushRouter);
   app.use(adminRouter);
 
   // Last resort: express-async-errors (imported above) forwards any
