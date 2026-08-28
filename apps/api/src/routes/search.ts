@@ -66,10 +66,10 @@ const URL_QUERY = /^https?:\/\//i;
 // seconds against slow remote servers. Public, same as the main search.
 // Registered before GET /search so "/fediverse" isn't ambiguous (it
 // isn't — different path — but keeps the two next to each other).
-searchRouter.get("/search/fediverse", async (req, res) => {
+searchRouter.get("/search/fediverse", optionalAuth, async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (!q || URL_QUERY.test(q)) return res.json({ results: [] });
-  res.json({ results: await searchFediverse(q) });
+  res.json({ results: await searchFediverse(q, req.actor?.id) });
 });
 
 // GET /search?q=... -> posts (by title), local people (by username, or by

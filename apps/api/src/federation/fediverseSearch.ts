@@ -40,9 +40,15 @@ const MASTODON_FAMILY = new Set([
 ]);
 
 const PER_SERVER_LIMIT = 8;
-const PER_SERVER_TIMEOUT_MS = 6000;
-const CONCURRENCY = 8;
+const PER_SERVER_TIMEOUT_MS = 4500;
+const CONCURRENCY = 10;
 const TOTAL_CAP = 25;
+// A curated/synced Explore list can run to thousands of servers (the
+// FediDB sync alone adds every instance over a size threshold). Fanning
+// a live search out across all of them would take minutes — so the sweep
+// is capped: the viewer's own subscribed servers first, then a stable
+// fill from the rest, up to this many.
+const MAX_SERVERS = 24;
 
 // Short cache so a re-render, a "search" re-fire on the same query, or
 // two people searching the same term don't re-fan the whole request.
@@ -164,18 +170,51 @@ async function searchOneServer(
   return [];
 }
 
-export async function searchFediverse(rawQuery: string): Promise<FediverseSearchResult[]> {
+export async function searchFediverse(
+  rawQuery: string,
+  viewerId?: string,
+): Promise<FediverseSearchResult[]> {
   const query = rawQuery.trim().replace(/^[#@]/, "");
   if (query.length < 2) return [];
 
-  const key = query.toLowerCase();
+  // Cache key folds in the viewer's server set (a logged-in viewer whose
+  // subscriptions differ gets their own entry) via viewerId — cheap and
+  // avoids one viewer's results leaking into another's smaller sweep.
+  const key = `${viewerId ?? "anon"}:${query.toLowerCase()}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.results;
 
-  const servers = await prisma.exploreServer.findMany({
-    where: { OR: [{ software: { in: [...MASTODON_FAMILY] } }, { software: { in: [...MISSKEY_FAMILY] } }] },
-    select: { domain: true, software: true, oauthAccessToken: true },
-  });
+  const softwareFilter = {
+    OR: [{ software: { in: [...MASTODON_FAMILY] } }, { software: { in: [...MISSKEY_FAMILY] } }],
+  };
+  const SERVER_SELECT = { domain: true, software: true, oauthAccessToken: true } as const;
+
+  // The viewer's own subscribed servers come first — those are the ones
+  // they actually chose to follow — then a stable fill from the rest.
+  const subscribed = viewerId
+    ? (
+        await prisma.exploreServer.findMany({
+          where: { AND: [softwareFilter, { subscriptions: { some: { actorId: viewerId } } }] },
+          select: SERVER_SELECT,
+          take: MAX_SERVERS,
+        })
+      )
+    : [];
+
+  const chosen = new Map(subscribed.map((s) => [s.domain, s]));
+  if (chosen.size < MAX_SERVERS) {
+    const fill = await prisma.exploreServer.findMany({
+      where: softwareFilter,
+      select: SERVER_SELECT,
+      orderBy: { createdAt: "asc" },
+      take: MAX_SERVERS,
+    });
+    for (const s of fill) {
+      if (chosen.size >= MAX_SERVERS) break;
+      if (!chosen.has(s.domain)) chosen.set(s.domain, s);
+    }
+  }
+  const servers = [...chosen.values()];
   if (servers.length === 0) return [];
 
   const slug = hashtagSlug(query);
